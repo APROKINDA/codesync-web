@@ -114,19 +114,64 @@ async function getCsharpCompiler() {
   csharpCompiler = hit.name;
   return csharpCompiler;
 }
+
+// The Wandbox C# compiler is an older Mono csc that doesn't understand bare
+// top-level statements (`Console.WriteLine("hi");` with no class around it).
+// If the room's code doesn't already define its own class, wrap it in one so
+// typing plain statements (what the editor starts you off with) just works.
+// The wrapper is kept to exactly one line so error line numbers below can be
+// shifted back by a fixed, known amount to match what's on screen.
+function wrapForCompile(code) {
+  if (/\bclass\s+\w+/.test(code)) return { src: code, offset: 0 };
+  const lines = code.split('\n');
+  let i = 0;
+  while (i < lines.length && /^\s*using\s+[\w.]+\s*;\s*$/.test(lines[i])) i++;
+  const usingLines = lines.slice(0, i);
+  const rest = lines.slice(i).join('\n');
+  const head = usingLines.concat([
+    'using System;using System.Collections.Generic;using System.Linq;using System.Text;class Program{static void Main(string[] args){',
+  ]).join('\n');
+  return { src: `${head}${rest}\n}}`, offset: head.split('\n').length };
+}
+const fixLineNumbers = (text, offset) => !offset ? text :
+  text.replace(/prog\.cs\((\d+),(\d+)\)/g, (_, l, c) => `prog.cs(${Math.max(1, Number(l) - offset)},${c})`);
+
+async function compileRoomCode(code) {
+  const compiler = await getCsharpCompiler();
+  const { src, offset } = wrapForCompile(code);
+  const r = await fetch('https://wandbox.org/api/compile.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ compiler, code: src, save: false }),
+  });
+  if (!r.ok) return { text: `[Wandbox error ${r.status}: ${await r.text()}]`, errors: [] };
+  const d = await r.json();
+  const errText = fixLineNumbers([d.compiler_error, d.compiler_output].filter(Boolean).join('\n'), offset);
+  const progText = [d.program_error, d.program_output].filter(Boolean).join('\n');
+  const text = [errText, progText].filter(Boolean).join('\n').trim() || '(no output)';
+  const errors = [];
+  const re = /prog\.cs\((\d+),(\d+)\):\s*error\s+\w+:\s*([^\n]+)/g;
+  let m; while ((m = re.exec(errText))) errors.push({ line: Number(m[1]), col: Number(m[2]), msg: m[3].trim() });
+  return { text, errors };
+}
 async function runCSharp(code) {
+  try { return (await compileRoomCode(code)).text; }
+  catch (e) { return `[Run failed: ${e.message}]`; }
+}
+
+// ---------------- live error checking (red squiggles) ----------------
+// A short pause after typing stops triggers a background compile; any error
+// locations found are broadcast so everyone's editor can underline them.
+async function checkRoom(r) {
+  const doc = r.doc, v = r.v;
   try {
-    const compiler = await getCsharpCompiler();
-    const r = await fetch('https://wandbox.org/api/compile.json', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ compiler, code, save: false }),
-    });
-    if (!r.ok) return `[Wandbox error ${r.status}: ${await r.text()}]`;
-    const d = await r.json();
-    const out = [d.compiler_error, d.compiler_output, d.program_error, d.program_output].filter(Boolean).join('\n').trim();
-    return out || '(no output)';
-  } catch (e) { return `[Run failed: ${e.message}]`; }
+    const { errors } = await compileRoomCode(doc);
+    if (r.v === v) broadcast(r, JSON.stringify({ type: 'diag', v, errors }));
+  } catch {}
+}
+function scheduleCheck(r) {
+  clearTimeout(r.checkTimer);
+  r.checkTimer = setTimeout(() => checkRoom(r), 700);
 }
 
 // ---------------- rooms: shared doc + operational transform ----------------
@@ -134,7 +179,7 @@ const rooms = new Map();
 function room(name) {
   if (!rooms.has(name)) rooms.set(name, {
     doc: 'Console.WriteLine("Hello from CodeSync!");\n\nfor (int i = 1; i <= 3; i++)\n    Console.WriteLine($"Line {i}");\n',
-    v: 0, clients: new Set(), running: false,
+    v: 0, clients: new Set(), running: false, checkTimer: null,
   });
   return rooms.get(name);
 }
@@ -157,6 +202,7 @@ function opOnRoom(r, from, base, ops) {
   }
   r.doc = d; r.v++;
   broadcast(r, JSON.stringify({ type: 'op', v: r.v, id: from.id, ops }));
+  scheduleCheck(r);
 }
 async function runRoom(r) {
   if (r.running) return;
@@ -186,6 +232,7 @@ wss.on('connection', (ws, req, user) => {
   send(client, JSON.stringify({ type: 'id', id: client.id }));
   send(client, initMsg(r));
   broadcast(r, usersMsg(r));
+  scheduleCheck(r);
 
   // A socket error with no listener here would otherwise crash the whole Node
   // process (taking down every room's in-memory doc along with it) — one
