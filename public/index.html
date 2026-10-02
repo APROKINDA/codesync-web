@@ -36,6 +36,7 @@ textarea{padding:22px 16px 14px}
 #mir{position:absolute;left:0;top:0;visibility:hidden;padding:22px 16px 14px;font:14px/1.6 var(--mono);white-space:pre;tab-size:4}
 .caret{position:absolute;width:2px;height:22.4px}
 .caret i{position:absolute;bottom:100%;left:0;font:600 11px/16px system-ui,sans-serif;padding:0 5px;border-radius:3px 3px 3px 0;white-space:nowrap}
+.err-mark{position:absolute;height:4px;pointer-events:auto;cursor:help;background:linear-gradient(135deg,transparent 40%,var(--bad) 40%,var(--bad) 60%,transparent 60%) repeat-x;background-size:6px 4px}
 .hide{display:none!important}
 #auth{flex:1;display:grid;place-items:center;padding:20px}
 #auth form{width:min(340px,100%);display:flex;flex-direction:column;gap:10px}
@@ -167,7 +168,14 @@ const moveCursor = (x, o) => o.t === 'i' ? (o.p <= x ? x + o.s.length : x) : (x 
 // ---- state ----
 let ws, doc = '', v = 0, id = '', ready = false;
 let outstanding = [], buffer = [];
-let peers = {}, cursors = {};
+let peers = {}, cursors = {}, diagnostics = [];
+
+function lineColToIndex(s, line, col) {
+  const lines = s.split('\n');
+  let idx = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i++) idx += lines[i].length + 1;
+  return Math.min(idx + Math.max(0, col - 1), s.length);
+}
 
 function shiftCursors(o) { for (const c of Object.values(cursors)) { c.s = moveCursor(c.s, o); c.e = moveCursor(c.e, o); } }
 const sendCursor = () => ready && ws.send(JSON.stringify({ type: 'cur', s: ed.selectionStart, e: ed.selectionEnd }));
@@ -217,6 +225,20 @@ function draw() {
     const tag = document.createElement('i'); tag.textContent = p.name; tag.style.cssText = `background:${p.color};color:${ink(p.color)}`;
     el.appendChild(tag); cur.appendChild(el);
   }
+  for (const d of diagnostics) {
+    const s = lineColToIndex(doc, d.line, d.col);
+    let e = s; while (e < doc.length && !/[\s;,(){}\[\]]/.test(doc[e])) e++;
+    if (e <= s) e = Math.min(s + 1, doc.length);
+    mir.textContent = doc.slice(0, s);
+    const sp1 = document.createElement('span'); sp1.textContent = '\u200b'; mir.appendChild(sp1);
+    const x1 = sp1.offsetLeft, y1 = sp1.offsetTop;
+    mir.textContent = doc.slice(0, e);
+    const sp2 = document.createElement('span'); sp2.textContent = '\u200b'; mir.appendChild(sp2);
+    const x2 = sp2.offsetLeft;
+    const mark = document.createElement('div'); mark.className = 'err-mark'; mark.title = d.msg;
+    mark.style.cssText = `left:${x1 - ed.scrollLeft}px;top:${y1 - ed.scrollTop + 17}px;width:${Math.max(6, x2 - x1)}px`;
+    cur.appendChild(mark);
+  }
 }
 ed.addEventListener('scroll', redraw);
 addEventListener('resize', redraw);
@@ -242,9 +264,10 @@ function connect() {
     const m = JSON.parse(ev.data);
     if (m.type === 'id') id = m.id;
     else if (m.type === 'init') {
-      v = m.v; doc = m.doc; outstanding = []; buffer = [];
+      v = m.v; doc = m.doc; outstanding = []; buffer = []; diagnostics = [];
       ed.value = doc; ready = true; setState('live', true); redraw();
-    } else if (m.type === 'op') {
+    } else if (m.type === 'diag') { diagnostics = m.errors; redraw(); }
+    else if (m.type === 'op') {
       if (m.id === id) { v = m.v; outstanding = []; flush(); sendCursor(); } else remote(m);
     } else if (m.type === 'users') setPeers(m.list);
     else if (m.type === 'cur') { cursors[m.id] = { s: m.s, e: m.e }; redraw(); }
