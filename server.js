@@ -143,6 +143,10 @@ const broadcast = (r, s, except) => { for (const c of r.clients) if (c !== excep
 const initMsg = r => JSON.stringify({ type: 'init', v: r.v, doc: r.doc });
 const usersMsg = r => JSON.stringify({ type: 'users', list: [...r.clients].map(c => ({ id: c.id, name: c.user.name, color: c.user.color })) });
 
+function applyOp(doc, o) {
+  if (o.t === 'i') return doc.slice(0, o.p) + o.s + doc.slice(o.p);
+  return doc.slice(0, o.p) + doc.slice(o.p + o.n);
+}
 function opOnRoom(r, from, base, ops) {
   if (base !== r.v) return;
   let d = r.doc;
@@ -183,15 +187,27 @@ wss.on('connection', (ws, req, user) => {
   send(client, initMsg(r));
   broadcast(r, usersMsg(r));
 
+  // A socket error with no listener here would otherwise crash the whole Node
+  // process (taking down every room's in-memory doc along with it) — one
+  // flaky phone connection could knock everyone else off and reset the text.
+  ws.on('error', () => {});
+
   ws.on('message', raw => {
-    let m; try { m = JSON.parse(raw); } catch { return; }
-    if (m.type === 'op') opOnRoom(r, client, m.base, m.ops);
-    else if (m.type === 'cur') broadcast(r, JSON.stringify({ type: 'cur', id: client.id, s: m.s, e: m.e }), client);
-    else if (m.type === 'profile') broadcast(r, usersMsg(r));
-    else if (m.type === 'ping') send(client, JSON.stringify({ type: 'pong', t: m.t }));
-    else if (m.type === 'run') runRoom(r);
+    try {
+      let m; try { m = JSON.parse(raw); } catch { return; }
+      if (m.type === 'op') opOnRoom(r, client, m.base, m.ops);
+      else if (m.type === 'cur') broadcast(r, JSON.stringify({ type: 'cur', id: client.id, s: m.s, e: m.e }), client);
+      else if (m.type === 'profile') broadcast(r, usersMsg(r));
+      else if (m.type === 'ping') send(client, JSON.stringify({ type: 'pong', t: m.t }));
+      else if (m.type === 'run') runRoom(r);
+    } catch (e) { console.error('message handler error:', e); }
   });
   ws.on('close', () => { r.clients.delete(client); broadcast(r, usersMsg(r)); });
 });
+
+// Last-resort safety nets: log and keep running instead of crashing the
+// process (a crash wipes every room's in-memory document back to the default).
+process.on('uncaughtException', e => console.error('uncaughtException:', e));
+process.on('unhandledRejection', e => console.error('unhandledRejection:', e));
 
 server.listen(PORT, () => console.log(`CodeSync listening on ${PORT}`));
