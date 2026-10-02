@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CodeSync</title>
+<style>
+:root{--bg:#14111f;--panel:#1c1830;--line:#2e2750;--fg:#e9e4f5;--mute:#8f86ad;--acc:#b48cff;--ok:#7fe0b0;--bad:#ff8fa3;
+--mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{font-size:17px;margin:0 auto 0 0;font-weight:650;letter-spacing:.2px}
+.pill{font-size:13px;color:var(--mute)}
+.pill b{color:var(--fg);font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:6px}
+.on .dot{background:var(--ok)}
+button{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:6px 14px;border-radius:6px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button.run{background:var(--acc);color:#1a1030;border-color:var(--acc);font-weight:650}
+button:disabled{opacity:.5;cursor:wait}
+main{flex:1;min-height:0;display:grid;grid-template-columns:3fr 2fr}
+@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:3fr 2fr}}
+section{min-height:0;display:flex;flex-direction:column}
+section+section{border-left:1px solid var(--line)}
+@media(max-width:800px){section+section{border-left:0;border-top:1px solid var(--line)}}
+.label{padding:6px 16px;font-size:13px;color:var(--mute);border-bottom:1px solid var(--line)}
+textarea,pre{flex:1;margin:0;padding:14px 16px;border:0;resize:none;background:transparent;color:var(--fg);font:14px/1.6 var(--mono);tab-size:4;white-space:pre;overflow:auto}
+textarea{caret-color:var(--acc)}
+pre{white-space:pre-wrap;background:var(--panel)}
+.wrap{position:relative;flex:1;min-height:0;display:flex}
+textarea{padding:22px 16px 14px}
+#cur{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+#mir{position:absolute;left:0;top:0;visibility:hidden;padding:22px 16px 14px;font:14px/1.6 var(--mono);white-space:pre;tab-size:4}
+.caret{position:absolute;width:2px;height:22.4px}
+.caret i{position:absolute;bottom:100%;left:0;font:600 11px/16px system-ui,sans-serif;padding:0 5px;border-radius:3px 3px 3px 0;white-space:nowrap}
+.hide{display:none!important}
+#auth{flex:1;display:grid;place-items:center;padding:20px}
+#auth form{width:min(340px,100%);display:flex;flex-direction:column;gap:10px}
+#auth h2{margin:0 0 4px;font-size:22px}
+input{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
+input[type=color]{padding:2px;height:34px;width:56px}
+.err{color:var(--bad);font-size:13px;min-height:18px}
+.link{background:none;border:0;color:var(--acc);padding:0;text-align:left}
+#me{display:flex;align-items:center;gap:8px}
+.sw{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none}
+#prof{position:absolute;right:16px;top:52px;z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;width:min(280px,calc(100% - 32px));display:flex;flex-direction:column;gap:10px}
+#prof label{font-size:13px;color:var(--mute);display:flex;flex-direction:column;gap:4px}
+#people{display:flex;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div id="auth" class="hide">
+  <form id="af">
+    <h2 id="at">Sign in to CodeSync</h2>
+    <input id="an" placeholder="Account name" autocomplete="username" maxlength="20" required aria-label="Account name">
+    <input id="ap" type="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
+    <input id="ai" placeholder="Invite code (if you were given one)" class="hide" aria-label="Invite code">
+    <div class="err" id="ae" role="alert"></div>
+    <button class="run" id="ab">Sign in</button>
+    <button type="button" class="link" id="as">New here? Create an account</button>
+  </form>
+</div>
+<header id="top" class="hide">
+  <h1>CodeSync · C#</h1>
+  <span class="pill"><span class="dot"></span><span id="st">connecting</span></span>
+  <span class="pill">Round trip <b id="rtt">–</b></span>
+  <span id="people" class="pill"></span>
+  <button id="copy">Copy room link</button>
+  <button id="me" aria-haspopup="true"><span class="sw" id="msw"></span><span id="mn"></span></button>
+  <button id="run" class="run" disabled>Run</button>
+</header>
+<div id="prof" class="hide">
+  <label>Name shown on your cursor<input id="pn" maxlength="20"></label>
+  <label>Cursor color<input id="pc" type="color"></label>
+  <div class="err" id="pe" role="alert"></div>
+  <button id="ps" class="run">Save</button>
+  <button id="lo" class="link">Sign out</button>
+</div>
+<main id="app" class="hide">
+  <section>
+    <div class="label">Program.cs</div>
+    <div class="wrap">
+      <textarea id="ed" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="C# code editor" readonly></textarea>
+      <div id="cur"></div><div id="mir"></div>
+    </div>
+  </section>
+  <section>
+    <div class="label">Output (shared with everyone in the room)</div>
+    <pre id="out">Press Run (or Ctrl+Enter) to compile and run the code.</pre>
+  </section>
+</main>
+<script>
+const $ = q => document.querySelector(q);
+const ed = $('#ed'), out = $('#out'), runBtn = $('#run');
+const room = location.hash.slice(1) || Math.random().toString(36).slice(2, 7);
+location.hash = room;
+const api = async (path, body) => {
+  const r = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { ok: r.ok, data: await r.json().catch(() => ({})) };
+};
+const ink = hex => (parseInt(hex.slice(1, 3), 16) * 299 + parseInt(hex.slice(3, 5), 16) * 587 + parseInt(hex.slice(5, 7), 16) * 114) / 1000 > 140 ? '#14111f' : '#fff';
+
+// ---- sign in / sign up ----
+let signup = false, me = null;
+function authMode(on) {
+  signup = on;
+  $('#at').textContent = on ? 'Create your account' : 'Sign in to CodeSync';
+  $('#ab').textContent = on ? 'Create account' : 'Sign in';
+  $('#as').textContent = on ? 'Already have an account? Sign in' : 'New here? Create an account';
+  $('#ai').classList.toggle('hide', !on);
+  $('#ap').autocomplete = on ? 'new-password' : 'current-password';
+  $('#ae').textContent = '';
+}
+$('#as').onclick = () => authMode(!signup);
+$('#af').onsubmit = async e => {
+  e.preventDefault();
+  const r = await api(signup ? '/api/signup' : '/api/login', { name: $('#an').value, password: $('#ap').value, invite: $('#ai').value });
+  if (r.ok) start(r.data); else $('#ae').textContent = r.data.error || 'Something went wrong';
+};
+function showMe() { $('#mn').textContent = me.name; $('#msw').style.background = me.color; }
+function start(u) {
+  me = u; showMe();
+  $('#auth').classList.add('hide');
+  for (const q of ['#top', '#app']) $(q).classList.remove('hide');
+  connect();
+}
+(async () => { const r = await api('/api/me'); if (r.ok) start(r.data); else $('#auth').classList.remove('hide'); })();
+
+// ---- profile ----
+$('#me').onclick = () => { $('#pn').value = me.name; $('#pc').value = me.color; $('#pe').textContent = ''; $('#prof').classList.toggle('hide'); };
+$('#ps').onclick = async () => {
+  const r = await api('/api/profile', { name: $('#pn').value, color: $('#pc').value });
+  if (!r.ok) return $('#pe').textContent = r.data.error || 'Could not save';
+  me = r.data; showMe(); $('#prof').classList.add('hide');
+  ws.send('{"type":"profile"}');
+};
+$('#lo').onclick = async () => { await api('/api/logout', {}); location.reload(); };
+
+// ---- operational transform: ops are {t:'i',p,s} or {t:'d',p,n} ----
+function xf(a, b, after) {
+  if (b.t === 'i') {
+    if (a.t === 'i') return [b.p < a.p || (b.p === a.p && after) ? { ...a, p: a.p + b.s.length } : a];
+    if (b.p <= a.p) return [{ ...a, p: a.p + b.s.length }];
+    if (b.p < a.p + a.n) { const k = b.p - a.p; return [{ t: 'd', p: a.p, n: k }, { t: 'd', p: a.p + b.s.length, n: a.n - k }]; }
+    return [a];
+  }
+  if (a.t === 'i') return [b.p + b.n <= a.p ? { ...a, p: a.p - b.n } : b.p < a.p ? { ...a, p: b.p } : a];
+  const ov = Math.max(0, Math.min(a.p + a.n, b.p + b.n) - Math.max(a.p, b.p)), n = a.n - ov;
+  return n ? [{ t: 'd', p: b.p < a.p ? a.p - Math.min(b.n, a.p - b.p) : a.p, n }] : [];
+}
+function xfLists(A, B, after) {
+  if (!A.length || !B.length) return [A, B];
+  if (A.length === 1 && B.length === 1) return [xf(A[0], B[0], after), xf(B[0], A[0], !after)];
+  if (A.length > 1) {
+    const [a1, B1] = xfLists([A[0]], B, after), [a2, B2] = xfLists(A.slice(1), B1, after);
+    return [a1.concat(a2), B2];
+  }
+  const [A1, b1] = xfLists(A, [B[0]], after), [A2, b2] = xfLists(A1, B.slice(1), after);
+  return [A2, b1.concat(b2)];
+}
+const apply = (s, o) => o.t === 'i' ? s.slice(0, o.p) + o.s + s.slice(o.p) : s.slice(0, o.p) + s.slice(o.p + o.n);
+const moveCursor = (x, o) => o.t === 'i' ? (o.p <= x ? x + o.s.length : x) : (x >= o.p + o.n ? x - o.n : Math.min(x, o.p));
+
+// ---- state ----
+let ws, doc = '', v = 0, id = '', ready = false;
+let outstanding = [], buffer = [];
+let peers = {}, cursors = {};
+
+function shiftCursors(o) { for (const c of Object.values(cursors)) { c.s = moveCursor(c.s, o); c.e = moveCursor(c.e, o); } }
+const sendCursor = () => ready && ws.send(JSON.stringify({ type: 'cur', s: ed.selectionStart, e: ed.selectionEnd }));
+
+ed.addEventListener('input', () => {
+  const n = ed.value, m = Math.min(doc.length, n.length);
+  let i = 0; while (i < m && doc[i] === n[i]) i++;
+  let e = 0; while (e < m - i && doc[doc.length - 1 - e] === n[n.length - 1 - e]) e++;
+  const del = doc.length - i - e, ins = n.slice(i, n.length - e), ops = [];
+  if (del) ops.push({ t: 'd', p: i, n: del });
+  if (ins) ops.push({ t: 'i', p: i, s: ins });
+  ops.forEach(shiftCursors);
+  buffer.push(...ops);
+  doc = n;
+  flush();
+  sendCursor();
+  redraw();
+});
+function flush() { if (ready && !outstanding.length && buffer.length) { outstanding = buffer; buffer = []; send(); } }
+const send = () => ws.send(JSON.stringify({ type: 'op', base: v, ops: outstanding }));
+
+function remote(m) {
+  v = m.v;
+  const [o2, r1] = xfLists(outstanding, m.ops, true); outstanding = o2;
+  const [b2, r2] = xfLists(buffer, r1, true); buffer = b2;
+  let s = ed.selectionStart, e = ed.selectionEnd;
+  for (const o of r2) { doc = apply(doc, o); s = moveCursor(s, o); e = moveCursor(e, o); shiftCursors(o); }
+  const top = ed.scrollTop, left = ed.scrollLeft;
+  ed.value = doc; ed.setSelectionRange(s, e); ed.scrollTop = top; ed.scrollLeft = left;
+  if (outstanding.length) send();
+  redraw();
+}
+
+// ---- remote cursors ----
+const cur = $('#cur'), mir = $('#mir');
+let dirty = false;
+function redraw() { if (!dirty) { dirty = true; requestAnimationFrame(draw); } }
+function draw() {
+  dirty = false;
+  cur.textContent = '';
+  for (const [pid, c] of Object.entries(cursors)) {
+    const p = peers[pid]; if (!p) continue;
+    mir.textContent = doc.slice(0, Math.min(c.e, doc.length));
+    const sp = document.createElement('span'); sp.textContent = '\u200b'; mir.appendChild(sp);
+    const el = document.createElement('div'); el.className = 'caret';
+    el.style.cssText = `left:${sp.offsetLeft - ed.scrollLeft}px;top:${sp.offsetTop - ed.scrollTop}px;background:${p.color}`;
+    const tag = document.createElement('i'); tag.textContent = p.name; tag.style.cssText = `background:${p.color};color:${ink(p.color)}`;
+    el.appendChild(tag); cur.appendChild(el);
+  }
+}
+ed.addEventListener('scroll', redraw);
+addEventListener('resize', redraw);
+document.addEventListener('selectionchange', () => { if (document.activeElement === ed) sendCursor(); });
+
+function setPeers(list) {
+  peers = {}; list.forEach(p => peers[p.id] = p);
+  for (const k of Object.keys(cursors)) if (!peers[k]) delete cursors[k];
+  const box = $('#people'); box.textContent = '';
+  list.forEach(p => {
+    const t = document.createElement('span'); t.style.cssText = 'display:inline-flex;align-items:center;gap:5px';
+    const d = document.createElement('span'); d.className = 'sw'; d.style.background = p.color;
+    t.append(d, p.id === id ? p.name + ' (you)' : p.name); box.appendChild(t);
+  });
+  sendCursor(); redraw();
+}
+
+// ---- connection ----
+function setState(text, on) { $('#st').textContent = text; $('#top').classList.toggle('on', on); ed.readOnly = !on; runBtn.disabled = !on; }
+function connect() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?room=' + encodeURIComponent(room));
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'id') id = m.id;
+    else if (m.type === 'init') {
+      v = m.v; doc = m.doc; outstanding = []; buffer = [];
+      ed.value = doc; ready = true; setState('live', true); redraw();
+    } else if (m.type === 'op') {
+      if (m.id === id) { v = m.v; outstanding = []; flush(); sendCursor(); } else remote(m);
+    } else if (m.type === 'users') setPeers(m.list);
+    else if (m.type === 'cur') { cursors[m.id] = { s: m.s, e: m.e }; redraw(); }
+    else if (m.type === 'pong') $('#rtt').textContent = Math.round(performance.now() - m.t) + ' ms';
+    else if (m.type === 'out') {
+      if (m.status) { out.textContent = 'Compiling and running…'; runBtn.disabled = true; }
+      else { out.textContent = m.text; runBtn.disabled = !ready; }
+    }
+  };
+  ws.onclose = async () => {
+    ready = false; setState('reconnecting', false);
+    const r = await api('/api/me');
+    if (!r.ok) return location.reload();
+    setTimeout(connect, 1000);
+  };
+}
+setInterval(() => ready && ws.send(JSON.stringify({ type: 'ping', t: performance.now() })), 2000);
+
+// ---- controls ----
+runBtn.onclick = () => ws.send('{"type":"run"}');
+$('#copy').onclick = async () => { try { await navigator.clipboard.writeText(location.href); $('#copy').textContent = 'Copied'; setTimeout(() => $('#copy').textContent = 'Copy room link', 1500); } catch {} };
+ed.addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '    '); }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runBtn.click(); }
+});
+</script>
+</body>
+</html>
