@@ -176,6 +176,14 @@ function lineColToIndex(s, line, col) {
   for (let i = 0; i < line - 1 && i < lines.length; i++) idx += lines[i].length + 1;
   return Math.min(idx + Math.max(0, col - 1), s.length);
 }
+function lineAt(s, pos) { let line = 1; for (let i = 0; i < pos && i < s.length; i++) if (s[i] === '\n') line++; return line; }
+
+// A line only shows its red squiggle once it's been untouched for a bit —
+// so a line someone else is actively typing on doesn't flicker underlines
+// mid-word. Updated as ops land, local or remote.
+let lineTouched = {};
+const touchLine = l => { lineTouched[l] = performance.now(); };
+const SETTLE_MS = 500;
 
 function shiftCursors(o) { for (const c of Object.values(cursors)) { c.s = moveCursor(c.s, o); c.e = moveCursor(c.e, o); } }
 const sendCursor = () => ready && ws.send(JSON.stringify({ type: 'cur', s: ed.selectionStart, e: ed.selectionEnd }));
@@ -187,6 +195,7 @@ ed.addEventListener('input', () => {
   const del = doc.length - i - e, ins = n.slice(i, n.length - e), ops = [];
   if (del) ops.push({ t: 'd', p: i, n: del });
   if (ins) ops.push({ t: 'i', p: i, s: ins });
+  touchLine(lineAt(doc, i));
   ops.forEach(shiftCursors);
   buffer.push(...ops);
   doc = n;
@@ -202,7 +211,7 @@ function remote(m) {
   const [o2, r1] = xfLists(outstanding, m.ops, true); outstanding = o2;
   const [b2, r2] = xfLists(buffer, r1, true); buffer = b2;
   let s = ed.selectionStart, e = ed.selectionEnd;
-  for (const o of r2) { doc = apply(doc, o); s = moveCursor(s, o); e = moveCursor(e, o); shiftCursors(o); }
+  for (const o of r2) { touchLine(lineAt(doc, o.p)); doc = apply(doc, o); s = moveCursor(s, o); e = moveCursor(e, o); shiftCursors(o); }
   const top = ed.scrollTop, left = ed.scrollLeft;
   ed.value = doc; ed.setSelectionRange(s, e); ed.scrollTop = top; ed.scrollLeft = left;
   if (outstanding.length) send();
@@ -226,6 +235,7 @@ function draw() {
     el.appendChild(tag); cur.appendChild(el);
   }
   for (const d of diagnostics) {
+    if (performance.now() - (lineTouched[d.line] || 0) < SETTLE_MS) continue;   // that line is still being edited
     const s = lineColToIndex(doc, d.line, d.col);
     let e = s; while (e < doc.length && !/[\s;,(){}\[\]]/.test(doc[e])) e++;
     if (e <= s) e = Math.min(s + 1, doc.length);
@@ -285,13 +295,34 @@ function connect() {
   };
 }
 setInterval(() => ready && ws.send(JSON.stringify({ type: 'ping', t: performance.now() })), 2000);
+setInterval(() => { if (diagnostics.length) redraw(); }, 150);   // catches the moment a line crosses the 0.5s settle mark
 
 // ---- controls ----
 runBtn.onclick = () => ws.send('{"type":"run"}');
 $('#copy').onclick = async () => { try { await navigator.clipboard.writeText(location.href); $('#copy').textContent = 'Copied'; setTimeout(() => $('#copy').textContent = 'Copy room link', 1500); } catch {} };
+const OPEN = { '(': ')', '{': '}', '[': ']' };
+const CLOSERS = new Set([')', '}', ']']);
 ed.addEventListener('keydown', e => {
-  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '    '); }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runBtn.click(); }
+  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '    '); return; }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runBtn.click(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const s = ed.selectionStart, eIdx = ed.selectionEnd;
+  if (s !== eIdx) return;   // leave an active selection alone
+  if (e.key === '"') {
+    e.preventDefault();
+    if (doc[s] === '"') ed.setSelectionRange(s + 1, s + 1);          // skip over an existing closing quote
+    else { document.execCommand('insertText', false, '""'); ed.setSelectionRange(s + 1, s + 1); }
+    sendCursor();
+  } else if (OPEN[e.key]) {
+    e.preventDefault();
+    document.execCommand('insertText', false, e.key + OPEN[e.key]);
+    ed.setSelectionRange(s + 1, s + 1);
+    sendCursor();
+  } else if (CLOSERS.has(e.key) && doc[s] === e.key) {
+    e.preventDefault();
+    ed.setSelectionRange(s + 1, s + 1);                               // skip over an existing closing bracket
+    sendCursor();
+  }
 });
 </script>
 </body>
