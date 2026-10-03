@@ -129,9 +129,13 @@ function wrapForCompile(code) {
   const usingLines = lines.slice(0, i);
   const rest = lines.slice(i).join('\n');
   const head = usingLines.concat([
-    'using System;using System.Collections.Generic;using System.Linq;using System.Text;class Program{static void Main(string[] args){',
+    'using System;using System.Collections.Generic;using System.Linq;using System.Text;',
+    'class Program{static void Main(string[] args){',
   ]).join('\n');
-  return { src: `${head}${rest}\n}}`, offset: head.split('\n').length };
+  // The extra newline before `rest` matters: it keeps every one of the user's
+  // lines starting at column 1, so only the line number needs correcting
+  // below — never the column.
+  return { src: `${head}\n${rest}\n}}`, offset: head.split('\n').length };
 }
 const fixLineNumbers = (text, offset) => !offset ? text :
   text.replace(/prog\.cs\((\d+),(\d+)\)/g, (_, l, c) => `prog.cs(${Math.max(1, Number(l) - offset)},${c})`);
@@ -171,7 +175,14 @@ async function checkRoom(r) {
 }
 function scheduleCheck(r) {
   clearTimeout(r.checkTimer);
-  r.checkTimer = setTimeout(() => checkRoom(r), 700);
+  // Mostly a debounce (settle 400ms after the last edit anywhere in the
+  // room), but if checks keep getting pushed off by continuous typing
+  // somewhere else, force one through every ~600ms anyway — otherwise a
+  // line that's gone quiet could wait a long time for its diagnostics
+  // just because someone else never stops typing elsewhere.
+  const now = Date.now();
+  const sinceLast = now - (r.lastCheckAt || 0);
+  r.checkTimer = setTimeout(() => { r.lastCheckAt = Date.now(); checkRoom(r); }, sinceLast > 600 ? 150 : 400);
 }
 
 // ---------------- rooms: shared doc + operational transform ----------------
