@@ -1,4 +1,4 @@
-// CodeSync — realtime multiplayer C# editor. Plain Node.js (Express + ws), no build step.
+// CodeSync — realtime multiplayer web editor (HTML, CSS, JavaScript). Plain Node.js (Express + ws), no build step.
 const express = require('express');
 const http = require('http');
 const crypto = require('crypto');
@@ -102,132 +102,111 @@ app.post('/api/profile', (req, res) => {
   res.json(pub(r.user));
 });
 
-// ---------------- Wandbox (compiles & runs the room's C#) ----------------
-// Free, public, no signup and no card: https://wandbox.org
-let csharpCompiler = null;
-async function getCsharpCompiler() {
-  if (csharpCompiler) return csharpCompiler;
-  const r = await fetch('https://wandbox.org/api/list.json');
-  const list = await r.json();
-  const hit = list.find(c => /^c#$|csharp/i.test(c.language)) || list.find(c => /c#/i.test(c.name));
-  if (!hit) throw new Error('No C# compiler found on Wandbox');
-  csharpCompiler = hit.name;
-  return csharpCompiler;
+// ---------------- rooms: three synced documents (HTML, CSS, JavaScript) ----------------
+// Nothing in here ever runs anyone's code. "Run" just tells the rest of the
+// room to rebuild their preview; each browser puts the three files together
+// and runs the page itself, in a sandboxed frame.
+const STARTERS = {
+  html: `<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+  <h1 id="score">Score: 0</h1>
+  <button id="target">Catch me!</button>
+</body>
+</html>
+`,
+  css: `body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: #14111f;
+  color: white;
+  font-family: sans-serif;
 }
 
-// The Wandbox C# compiler is an older Mono csc that doesn't understand bare
-// top-level statements (`Console.WriteLine("hi");` with no class around it).
-// If the room's code doesn't already define its own class, wrap it in one so
-// typing plain statements (what the editor starts you off with) just works.
-// The wrapper is kept to exactly one line so error line numbers below can be
-// shifted back by a fixed, known amount to match what's on screen.
-function wrapForCompile(code) {
-  if (/\bclass\s+\w+/.test(code)) return { src: code, offset: 0 };
-  const lines = code.split('\n');
-  let i = 0;
-  while (i < lines.length && /^\s*using\s+[\w.]+\s*;\s*$/.test(lines[i])) i++;
-  const usingLines = lines.slice(0, i);
-  const rest = lines.slice(i).join('\n');
-  const head = usingLines.concat([
-    'using System;using System.Collections.Generic;using System.Linq;using System.Text;',
-    'class Program{static void Main(string[] args){',
-  ]).join('\n');
-  // The extra newline before `rest` matters: it keeps every one of the user's
-  // lines starting at column 1, so only the line number needs correcting
-  // below — never the column.
-  return { src: `${head}\n${rest}\n}}`, offset: head.split('\n').length };
-}
-const fixLineNumbers = (text, offset) => !offset ? text :
-  text.replace(/prog\.cs\((\d+),(\d+)\)/g, (_, l, c) => `prog.cs(${Math.max(1, Number(l) - offset)},${c})`);
-
-async function compileRoomCode(code) {
-  const compiler = await getCsharpCompiler();
-  const { src, offset } = wrapForCompile(code);
-  const r = await fetch('https://wandbox.org/api/compile.json', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ compiler, code: src, save: false }),
-  });
-  if (!r.ok) return { text: `[Wandbox error ${r.status}: ${await r.text()}]`, errors: [] };
-  const d = await r.json();
-  const errText = fixLineNumbers([d.compiler_error, d.compiler_output].filter(Boolean).join('\n'), offset);
-  const progText = [d.program_error, d.program_output].filter(Boolean).join('\n');
-  const text = [errText, progText].filter(Boolean).join('\n').trim() || '(no output)';
-  const errors = [];
-  const re = /prog\.cs\((\d+),(\d+)\):\s*error\s+\w+:\s*([^\n]+)/g;
-  let m; while ((m = re.exec(errText))) errors.push({ line: Number(m[1]), col: Number(m[2]), msg: m[3].trim() });
-  return { text, errors };
-}
-async function runCSharp(code) {
-  try { return (await compileRoomCode(code)).text; }
-  catch (e) { return `[Run failed: ${e.message}]`; }
+h1 {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
 }
 
-// ---------------- live error checking (red squiggles) ----------------
-// A short pause after typing stops triggers a background compile; any error
-// locations found are broadcast so everyone's editor can underline them.
-async function checkRoom(r) {
-  const doc = r.doc, v = r.v;
-  try {
-    const { errors } = await compileRoomCode(doc);
-    if (r.v === v) broadcast(r, JSON.stringify({ type: 'diag', v, errors }));
-  } catch {}
+#target {
+  position: absolute;
+  font-size: 22px;
+  padding: 14px 24px;
+  border: 0;
+  border-radius: 12px;
+  background: #b48cff;
+  color: #1a1030;
 }
-function scheduleCheck(r) {
-  clearTimeout(r.checkTimer);
-  // Mostly a debounce (settle 400ms after the last edit anywhere in the
-  // room), but if checks keep getting pushed off by continuous typing
-  // somewhere else, force one through every ~600ms anyway — otherwise a
-  // line that's gone quiet could wait a long time for its diagnostics
-  // just because someone else never stops typing elsewhere.
-  const now = Date.now();
-  const sinceLast = now - (r.lastCheckAt || 0);
-  r.checkTimer = setTimeout(() => { r.lastCheckAt = Date.now(); checkRoom(r); }, sinceLast > 600 ? 150 : 400);
+`,
+  js: `// Tap the button to score. It jumps somewhere new every time!
+const target = document.getElementById("target");
+const scoreText = document.getElementById("score");
+let score = 0;
+
+function jump() {
+  const x = Math.random() * Math.max(0, window.innerWidth - target.offsetWidth);
+  const y = 60 + Math.random() * Math.max(0, window.innerHeight - target.offsetHeight - 60);
+  target.style.left = x + "px";
+  target.style.top = y + "px";
 }
 
-// ---------------- rooms: shared doc + operational transform ----------------
+target.addEventListener("click", () => {
+  score++;
+  scoreText.textContent = "Score: " + score;
+  jump();
+});
+
+jump();
+`,
+};
+const LANGS = Object.keys(STARTERS);
+const MAX_DOC = 200000;
+
 const rooms = new Map();
 function room(name) {
-  if (!rooms.has(name)) rooms.set(name, {
-    doc: 'Console.WriteLine("Hello from CodeSync!");\n\nfor (int i = 1; i <= 3; i++)\n    Console.WriteLine($"Line {i}");\n',
-    v: 0, clients: new Set(), running: false, checkTimer: null,
-  });
+  if (!rooms.has(name)) {
+    const docs = {};
+    for (const l of LANGS) docs[l] = { text: STARTERS[l], v: 0 };
+    rooms.set(name, { docs, clients: new Set(), lastRun: 0 });
+  }
   return rooms.get(name);
 }
 const send = (c, s) => { try { c.ws.send(s); } catch {} };
 const broadcast = (r, s, except) => { for (const c of r.clients) if (c !== except) send(c, s); };
-const initMsg = r => JSON.stringify({ type: 'init', v: r.v, doc: r.doc });
+const initMsg = (r, lang) => JSON.stringify({ type: 'init', lang, v: r.docs[lang].v, doc: r.docs[lang].text });
 const usersMsg = r => JSON.stringify({ type: 'users', list: [...r.clients].map(c => ({ id: c.id, name: c.user.name, color: c.user.color })) });
 
 function applyOp(doc, o) {
   if (o.t === 'i') return doc.slice(0, o.p) + o.s + doc.slice(o.p);
   return doc.slice(0, o.p) + doc.slice(o.p + o.n);
 }
-function opOnRoom(r, from, base, ops) {
-  if (base !== r.v) return;
-  let d = r.doc;
+const validOps = ops => Array.isArray(ops) && ops.length > 0 && ops.length <= 10000 && ops.every(o => o && Number.isInteger(o.p) && (
+  (o.t === 'i' && typeof o.s === 'string' && o.s.length > 0 && o.s.length <= MAX_DOC) ||
+  (o.t === 'd' && Number.isInteger(o.n) && o.n > 0)));
+function opOnRoom(r, from, lang, base, ops) {
+  if (!LANGS.includes(lang)) return;
+  const d = r.docs[lang];
+  if (!validOps(ops)) { send(from, initMsg(r, lang)); return; }
+  if (base !== d.v) return;   // made against an older version: the client transforms and resends
+  let text = d.text;
   for (const o of ops) {
-    if (o.p < 0 || o.p > d.length) { send(from, initMsg(r)); return; }
-    if (o.t === 'd' && (o.n < 0 || o.p + o.n > d.length)) { send(from, initMsg(r)); return; }
-    d = applyOp(d, o);
+    if (o.p < 0 || o.p > text.length) { send(from, initMsg(r, lang)); return; }
+    if (o.t === 'd' && o.p + o.n > text.length) { send(from, initMsg(r, lang)); return; }
+    text = applyOp(text, o);
+    if (text.length > MAX_DOC) { send(from, initMsg(r, lang)); return; }
   }
-  r.doc = d; r.v++;
-  broadcast(r, JSON.stringify({ type: 'op', v: r.v, id: from.id, ops }));
-  scheduleCheck(r);
-}
-async function runRoom(r) {
-  if (r.running) return;
-  r.running = true;
-  broadcast(r, JSON.stringify({ type: 'out', status: 'running' }));
-  const code = r.doc;
-  const text = await runCSharp(code);
-  r.running = false;
-  broadcast(r, JSON.stringify({ type: 'out', text }));
+  d.text = text; d.v++;
+  broadcast(r, JSON.stringify({ type: 'op', lang, v: d.v, id: from.id, ops }));
 }
 
 // ---------------- websocket ----------------
 const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
 server.on('upgrade', (req, socket, head) => {
   if (!req.url.startsWith('/ws')) return socket.destroy();
   const user = me(req);
@@ -241,30 +220,35 @@ wss.on('connection', (ws, req, user) => {
   const client = { id: crypto.randomUUID().slice(0, 6), user, ws };
   r.clients.add(client);
   send(client, JSON.stringify({ type: 'id', id: client.id }));
-  send(client, initMsg(r));
+  for (const l of LANGS) send(client, initMsg(r, l));
   broadcast(r, usersMsg(r));
-  scheduleCheck(r);
 
   // A socket error with no listener here would otherwise crash the whole Node
-  // process (taking down every room's in-memory doc along with it) — one
+  // process (taking down every room's in-memory docs along with it) — one
   // flaky phone connection could knock everyone else off and reset the text.
   ws.on('error', () => {});
 
   ws.on('message', raw => {
     try {
       let m; try { m = JSON.parse(raw); } catch { return; }
-      if (m.type === 'op') opOnRoom(r, client, m.base, m.ops);
-      else if (m.type === 'cur') broadcast(r, JSON.stringify({ type: 'cur', id: client.id, s: m.s, e: m.e }), client);
+      if (m.type === 'op') opOnRoom(r, client, m.lang, m.base, m.ops);
+      else if (m.type === 'cur' && LANGS.includes(m.lang) && Number.isInteger(m.s) && Number.isInteger(m.e)) broadcast(r, JSON.stringify({ type: 'cur', lang: m.lang, id: client.id, s: m.s, e: m.e }), client);
       else if (m.type === 'profile') broadcast(r, usersMsg(r));
       else if (m.type === 'ping') send(client, JSON.stringify({ type: 'pong', t: m.t }));
-      else if (m.type === 'run') runRoom(r);
+      else if (m.type === 'run') {
+        // The sender already restarted their own preview; tell everyone else to do the same.
+        const now = Date.now();
+        if (now - r.lastRun < 400) return;   // ignore a flurry of presses
+        r.lastRun = now;
+        broadcast(r, JSON.stringify({ type: 'run', by: client.user.name }), client);
+      }
     } catch (e) { console.error('message handler error:', e); }
   });
   ws.on('close', () => { r.clients.delete(client); broadcast(r, usersMsg(r)); });
 });
 
 // Last-resort safety nets: log and keep running instead of crashing the
-// process (a crash wipes every room's in-memory document back to the default).
+// process (a crash wipes every room's in-memory documents back to the starters).
 process.on('uncaughtException', e => console.error('uncaughtException:', e));
 process.on('unhandledRejection', e => console.error('unhandledRejection:', e));
 
