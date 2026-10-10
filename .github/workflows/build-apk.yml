@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  APP_URL: https://YOUR-SITE-ADDRESS
+  APP_URL: https://https://fxw05vjnra.preview.c35.airoapp.ai/?airoShareToken=Os1hzsSYEex2#ok4f8
 
 jobs:
   apk:
