@@ -102,7 +102,7 @@ app.post('/api/profile', (req, res) => {
   res.json(pub(r.user));
 });
 
-// ---------------- rooms: three synced documents (HTML, CSS, JavaScript) ----------------
+// ---------------- rooms: four synced documents (HTML, CSS, JavaScript, Assets) ----------------
 // Nothing in here ever runs anyone's code. "Run" just tells the rest of the
 // room to rebuild their preview; each browser puts the three files together
 // and runs the page itself, in a sandboxed frame.
@@ -113,55 +113,145 @@ const STARTERS = {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
-  <h1 id="score">Score: 0</h1>
-  <button id="target">Catch me!</button>
+  <button id="restart">Restart</button>
 </body>
 </html>
 `,
   css: `body {
   margin: 0;
-  height: 100vh;
   overflow: hidden;
   background: #14111f;
-  color: white;
   font-family: sans-serif;
 }
 
-h1 {
-  margin: 0;
-  padding: 16px;
-  text-align: center;
-}
-
-#target {
-  position: absolute;
-  font-size: 22px;
-  padding: 14px 24px;
+#restart {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  padding: 8px 14px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #b48cff;
   color: #1a1030;
+  font-size: 16px;
 }
 `,
-  js: `// Tap the button to score. It jumps somewhere new every time!
-const target = document.getElementById("target");
-const scoreText = document.getElementById("score");
-let score = 0;
+  js: `// Your game! The things in it live in the Assets tab (player, coin, enemy, tree).
+//
+// Handy commands:
+//   spawn("coin", x, y)             put an asset on the screen
+//   onUpdate(dt => { ... })         runs every frame (dt = seconds since the last frame)
+//   onTouch("player", "coin", (a, b) => { ... })    runs when two things touch
+//   hud("text")                     text in the top-left corner
+//   controls({ dpad: { size: 130 }, buttons: ["A", "B"] })    on-screen controls
+//   input.left  input.right  input.up  input.down  input.A  input.B
+//   thing.x  thing.y  thing.w  thing.h  thing.scale  thing.color  thing.destroy()
+//   after(2, fn)   every(2, fn)     timers (seconds)
+//   random(1, 10)   world.width   world.height   world.background
 
-function jump() {
-  const x = Math.random() * Math.max(0, window.innerWidth - target.offsetWidth);
-  const y = 60 + Math.random() * Math.max(0, window.innerHeight - target.offsetHeight - 60);
-  target.style.left = x + "px";
-  target.style.top = y + "px";
+world.size(480, 320);                   // a fixed game screen (delete this line to fill the whole screen)
+world.background = "#14111f";
+controls({ dpad: { size: 130 } });      // on-screen D-pad (arrow keys and WASD work too)
+
+let score = 0;
+let safeTime = 2;                      // a moment of safety at the start
+
+spawn("tree", 50, 130);
+spawn("tree", world.width - 50, 210);
+
+const player = spawn("player", world.width / 2, world.height / 2);
+player.opacity = 0.5;                     // faded = safe for a moment
+
+function dropCoin() {
+  spawn("coin", random(30, world.width - 30), random(70, world.height - 170));
+}
+for (let i = 0; i < 3; i++) dropCoin();
+
+for (let i = 0; i < 2; i++) {
+  // start in the top corners, away from the player
+  const enemy = spawn("enemy", i === 0 ? 40 : world.width - 40, random(30, 60));
+  enemy.vx = (i === 0 ? 1 : -1) * enemy.speed;
+  enemy.vy = enemy.speed * 0.1;
 }
 
-target.addEventListener("click", () => {
-  score++;
-  scoreText.textContent = "Score: " + score;
-  jump();
+onTouch("player", "coin", (p, coin) => {
+  score += coin.value;
+  coin.destroy();
+  dropCoin();
 });
 
-jump();
+onTouch("player", "enemy", () => {
+  if (safeTime > 0) return;
+  player.health -= 1;
+  safeTime = 1;
+  player.opacity = 0.5;
+  if (player.health <= 0) restart();
+});
+
+onUpdate(dt => {
+  if (safeTime > 0) {
+    safeTime -= dt;
+    if (safeTime <= 0) player.opacity = 1;
+  }
+  hud("Score: " + score + "    Health: " + player.health);
+});
+
+function restart() {
+  score = 0;
+  safeTime = 2;
+  player.health = 3;
+  player.opacity = 0.5;
+  player.x = world.width / 2;
+  player.y = world.height / 2;
+}
+document.getElementById("restart").addEventListener("click", restart);
+`,
+  assets: `// Assets are the things in your game. Make one here, then in your
+// JavaScript write spawn("name", x, y) to put it on the screen.
+//
+//   shape    rect, circle, ellipse, triangle, diamond, polygon, star, heart, line, text
+//   w, h     size (change these and the asset resizes everywhere)
+//   color    a color name or a #hex code (the gallery on the right has color dots)
+//   parts    build one asset out of several shapes (see "player" and "tree")
+//   props    your own values, like speed or health. In your game: player.speed
+//   control  "move" (arrow keys, WASD, on-screen D-pad), "pointer" (follows your finger) or "both"
+//   edges    what happens at the screen edge: "stop", "bounce" or "wrap"
+//   tags     extra names, so one rule can match many assets
+{
+  "player": {
+    "w": 40, "h": 40,
+    "control": "move",
+    "parts": [
+      { "shape": "rect", "w": 40, "h": 40, "radius": 10, "color": "#7fe0b0" },
+      { "shape": "circle", "x": -9, "y": -5, "w": 11, "h": 11, "color": "white" },
+      { "shape": "circle", "x": 9, "y": -5, "w": 11, "h": 11, "color": "white" },
+      { "shape": "circle", "x": -9, "y": -4, "w": 5, "h": 5, "color": "#14111f" },
+      { "shape": "circle", "x": 9, "y": -4, "w": 5, "h": 5, "color": "#14111f" }
+    ],
+    "props": { "speed": 220, "health": 3 }
+  },
+
+  "coin": {
+    "shape": "circle", "w": 20, "h": 20,
+    "color": "gold", "stroke": "#b8860b", "lineWidth": 2,
+    "props": { "value": 1 }
+  },
+
+  "enemy": {
+    "shape": "triangle", "w": 34, "h": 34,
+    "color": "#ff6b81",
+    "edges": "bounce",
+    "props": { "speed": 90 }
+  },
+
+  "tree": {
+    "w": 40, "h": 60,
+    "parts": [
+      { "shape": "rect", "x": 0, "y": 18, "w": 10, "h": 26, "color": "#8b5a2b" },
+      { "shape": "circle", "x": 0, "y": -8, "w": 40, "h": 40, "color": "#2e8b57" }
+    ]
+  }
+}
 `,
 };
 const LANGS = Object.keys(STARTERS);
