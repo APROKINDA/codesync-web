@@ -1,0 +1,258 @@
+# Builds the CodeSync Android app (an .apk file) on GitHub's servers, for free.
+# The whole app is described in this one file, so there is nothing else to add.
+#
+# 1) Put YOUR site address on the APP_URL line below (it must start with https://).
+# 2) Commit. Then open the Actions tab and watch "Build Android app" run (about 4 minutes).
+# 3) When it is green, open the Releases section of the repo: CodeSync.apk is there.
+name: Build Android app
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: write
+
+env:
+  APP_URL: https://YOUR-SITE-ADDRESS
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the site address
+        run: |
+          case "$APP_URL" in
+            https://YOUR-SITE-ADDRESS*|"") echo "::error::Edit the APP_URL line at the top of .github/workflows/build-apk.yml and put your real site address there."; exit 1;;
+            https://*) echo "Using $APP_URL";;
+            *) echo "::error::APP_URL must start with https://"; exit 1;;
+          esac
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Write the app files
+        run: |
+          mkdir -p app/src/main/java/com/codesync/app app/src/main/res/drawable app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+            repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'CodeSync'
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=false
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'com.codesync.app'
+            compileSdk 34
+            defaultConfig {
+              applicationId 'com.codesync.app'
+              minSdk 24
+              targetSdk 34
+              versionCode 1
+              versionName '1.0'
+              buildConfigField 'String', 'APP_URL', '"' + System.getenv('APP_URL') + '"'
+            }
+            buildFeatures { buildConfig true }
+            compileOptions {
+              sourceCompatibility JavaVersion.VERSION_17
+              targetCompatibility JavaVersion.VERSION_17
+            }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <application
+              android:label="CodeSync"
+              android:icon="@drawable/ic_launcher"
+              android:theme="@style/AppTheme"
+              android:allowBackup="false"
+              android:usesCleartextTraffic="false">
+              <activity
+                android:name=".MainActivity"
+                android:exported="true"
+                android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+                android:windowSoftInputMode="adjustResize">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN" />
+                  <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <style name="AppTheme" parent="android:Theme.DeviceDefault.NoActionBar">
+              <item name="android:windowBackground">@android:color/black</item>
+              <item name="android:statusBarColor">#14111F</item>
+              <item name="android:navigationBarColor">#14111F</item>
+            </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#14111F" android:pathData="M0,0h108v108h-108z" />
+            <path android:strokeColor="#B48CFF" android:strokeWidth="8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M40,38 L24,54 L40,70" />
+            <path android:strokeColor="#B48CFF" android:strokeWidth="8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M68,38 L84,54 L68,70" />
+            <path android:strokeColor="#7FE0B0" android:strokeWidth="8" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M59,32 L49,76" />
+          </vector>
+          EOF
+
+          cat > app/src/main/java/com/codesync/app/MainActivity.java <<'EOF'
+          package com.codesync.app;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.webkit.CookieManager;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceError;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.FrameLayout;
+
+          public class MainActivity extends Activity {
+            private WebView web;
+            private FrameLayout root;
+            private View customView;
+            private WebChromeClient.CustomViewCallback customCallback;
+
+            @Override
+            protected void onCreate(Bundle saved) {
+              super.onCreate(saved);
+              root = new FrameLayout(this);
+              root.setBackgroundColor(Color.parseColor("#14111F"));
+              web = new WebView(this);
+              web.setBackgroundColor(Color.parseColor("#14111F"));
+              root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+              setContentView(root);
+
+              WebSettings s = web.getSettings();
+              s.setJavaScriptEnabled(true);
+              s.setDomStorageEnabled(true);
+              s.setMediaPlaybackRequiresUserGesture(false);
+              CookieManager.getInstance().setAcceptCookie(true);
+
+              web.setWebChromeClient(new WebChromeClient() {
+                @Override
+                public void onShowCustomView(View view, CustomViewCallback callback) {
+                  if (customView != null) { callback.onCustomViewHidden(); return; }
+                  customView = view;
+                  customCallback = callback;
+                  root.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  web.setVisibility(View.GONE);
+                }
+                @Override
+                public void onHideCustomView() {
+                  if (customView == null) return;
+                  root.removeView(customView);
+                  customView = null;
+                  web.setVisibility(View.VISIBLE);
+                  if (customCallback != null) customCallback.onCustomViewHidden();
+                  customCallback = null;
+                }
+              });
+
+              web.setWebViewClient(new WebViewClient() {
+                @Override
+                public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                  Uri u = request.getUrl();
+                  String mine = Uri.parse(BuildConfig.APP_URL).getHost();
+                  if (u.getHost() != null && u.getHost().equals(mine)) return false;
+                  try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception e) { }
+                  return true;
+                }
+                @Override
+                public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                  if (!request.isForMainFrame()) return;
+                  String page = "<html><body style='background:#14111f;color:#e9e4f5;font-family:sans-serif;text-align:center;padding:40px 20px'>"
+                    + "<h2>Can't reach CodeSync</h2><p>Check your internet, or the server may be asleep.</p>"
+                    + "<p><a style='color:#b48cff;font-size:20px' href='" + BuildConfig.APP_URL + "'>Try again</a></p></body></html>";
+                  view.loadDataWithBaseURL(BuildConfig.APP_URL, page, "text/html", "utf-8", null);
+                }
+              });
+
+              if (saved != null) web.restoreState(saved);
+              else web.loadUrl(BuildConfig.APP_URL);
+            }
+
+            @Override
+            protected void onSaveInstanceState(Bundle out) {
+              super.onSaveInstanceState(out);
+              web.saveState(out);
+            }
+
+            @Override
+            protected void onPause() {
+              CookieManager.getInstance().flush();
+              super.onPause();
+            }
+
+            @Override
+            public void onBackPressed() {
+              if (customView != null) { web.getWebChromeClient().onHideCustomView(); return; }
+              if (web.canGoBack()) web.goBack();
+              else super.onBackPressed();
+            }
+          }
+          EOF
+
+      - name: Build
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Name the file
+        run: cp app/build/outputs/apk/debug/app-debug.apk CodeSync.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CodeSync-app
+          path: CodeSync.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-latest
+          name: CodeSync app
+          body: Download CodeSync.apk below, open it on your phone and tap Install.
+          files: CodeSync.apk
