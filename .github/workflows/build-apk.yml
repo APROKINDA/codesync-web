@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  APP_URL: https://https://fxw05vjnra.preview.c35.airoapp.ai/?airoShareToken=Os1hzsSYEex2#ok4f8
+  APP_URL: https://fxw05vjnra.preview.c35.airoapp.ai/?airoShareToken=Os1hzsSYEex2#ok4f8
 
 jobs:
   apk:
@@ -35,7 +35,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - name: Prepare Android tools
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "SDK folder: $ANDROID_HOME"
+          SDKM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1) || true
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-34" "build-tools;34.0.0" || true
 
       - uses: gradle/actions/setup-gradle@v4
         with:
