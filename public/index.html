@@ -36,6 +36,27 @@ section+section{border-left:1px solid var(--line)}
 textarea,pre{flex:1;margin:0;padding:14px 16px;border:0;resize:none;background:transparent;color:var(--fg);font:14px/1.6 var(--mono);tab-size:2;white-space:pre;overflow:auto}
 textarea{caret-color:var(--acc)}
 pre{white-space:pre-wrap;background:var(--panel)}
+.label.row .btns{display:flex;gap:6px;flex:none}
+#gList{flex:1;min-height:0;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px;background:var(--panel)}
+#gList.stale{opacity:.4;pointer-events:none}
+#gErr{padding:8px 14px;font-size:13px;color:var(--bad);border-bottom:1px solid var(--line);background:#2a1a28}
+.card{display:flex;gap:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px}
+.thumb{flex:none;width:76px;height:76px;border-radius:8px;background:repeating-conic-gradient(#2a2445 0% 25%,#221d38 0% 50%) 50%/16px 16px}
+.cinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.ctop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cname{font-weight:650}
+.csnip{font:12px var(--mono);color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:13px;color:var(--mute)}
+.fld{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--mute)}
+.fld input[type=number]{width:66px;padding:4px 6px;font-size:13px}
+.fld input[type=color]{width:34px;height:26px;padding:1px}
+.fld input[type=checkbox]{width:auto}
+.fld input:not([type=number]):not([type=color]):not([type=checkbox]){width:110px;padding:4px 6px;font-size:13px}
+.sel{font:inherit;font-size:13px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+.ptag{font:600 12px var(--mono);color:var(--acc)}
+.cwarn{font-size:12px;color:#ffb454}
+button.mini{padding:3px 10px;font-size:12px;flex:none}
+.empty{color:var(--mute);font-size:14px;padding:6px 2px}
 #preview{flex:1;min-height:0;width:100%;border:0;background:#fff}
 #console{flex:none;height:96px;padding:8px 12px;font-size:12px;line-height:1.4;border-top:1px solid var(--line)}
 #outWeb.full{position:fixed;inset:0;z-index:30;background:var(--bg);padding-top:env(safe-area-inset-top,0px)}
@@ -97,9 +118,14 @@ input[type=color]{padding:2px;height:34px;width:56px}
     </div>
   </section>
   <section id="outWeb">
-    <div class="label row"><span>Preview: Run puts HTML + CSS + JavaScript together and runs it</span><button id="fs">Fullscreen</button></div>
+    <div class="label row"><span>Preview: Run builds everything and starts it</span><span class="btns"><button id="toAssets" class="hide">Assets</button><button id="fs">Fullscreen</button></span></div>
     <iframe id="preview" title="Preview" sandbox="allow-scripts"></iframe>
     <pre id="console" aria-label="Console">Press Run to start your project.</pre>
+  </section>
+  <section id="outAssets" class="hide">
+    <div class="label row"><span id="gSummary">Assets</span><span class="btns"><button id="gNew">+ New asset</button><button id="gPreview">Preview</button></span></div>
+    <div id="gErr" class="hide" role="alert"></div>
+    <div id="gList" aria-label="Asset gallery"></div>
   </section>
 </main>
 <script>
@@ -113,13 +139,17 @@ const api = async (path, body) => {
 };
 const ink = hex => (parseInt(hex.slice(1, 3), 16) * 299 + parseInt(hex.slice(3, 5), 16) * 587 + parseInt(hex.slice(5, 7), 16) * 114) / 1000 > 140 ? '#14111f' : '#fff';
 
-// ---- the three files in every room ----
+// ---- the four files in every room ----
 const TABS = [
   { k: 'html', label: 'HTML', file: 'index.html' },
   { k: 'css', label: 'CSS', file: 'style.css' },
   { k: 'js', label: 'JavaScript', file: 'script.js' },
+  { k: 'assets', label: 'Assets', file: 'assets.json' },
 ];
 const langLabel = k => (TABS.find(t => t.k === k) || {}).label || k;
+const SHAPE_LIST = ['rect', 'circle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'heart', 'line', 'text'];
+// names an object already uses itself, so they can't be used for your own properties
+const RESERVED = ['x', 'y', 'w', 'h', 'scale', 'angle', 'opacity', 'visible', 'z', 'vx', 'vy', 'gravity', 'control', 'edges', 'alive', 'parts', 'id', 'name', 'tags', 'r', 'color', 'text', 'baseW', 'baseH', 'destroy', 'setSize', 'grow', 'moveTo', 'distanceTo', 'touching', 'stayInWorld'];
 
 // ---- sign in / sign up ----
 let signup = false, me = null;
@@ -182,8 +212,657 @@ function xfLists(A, B, after) {
 const apply = (s, o) => o.t === 'i' ? s.slice(0, o.p) + o.s + s.slice(o.p) : s.slice(0, o.p) + s.slice(o.p + o.n);
 const moveCursor = (x, o) => o.t === 'i' ? (o.p <= x ? x + o.s.length : x) : (x >= o.p + o.n ? x - o.n : Math.min(x, o.p));
 
+// =====================================================================
+// THE ENGINE. These three functions are pasted into the preview page
+// (so they must not use anything from outside themselves). normalizeAsset
+// and drawParts are also used by the Assets gallery on this page.
+// =====================================================================
+
+// Turns one asset written in the Assets tab into a complete, checked asset.
+function normalizeAsset(name, def) {
+  var warnings = [];
+  var SH = ['rect', 'circle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'heart', 'line', 'text'];
+  var KNOWN = { shape: 1, w: 1, h: 1, color: 1, stroke: 1, lineWidth: 1, parts: 1, props: 1, tags: 1, control: 1, edges: 1, rotation: 1, opacity: 1, z: 1, text: 1, font: 1, sides: 1, points: 1, radius: 1, vx: 1, vy: 1, gravity: 1, scale: 1 };
+  function warn(m) { warnings.push('Asset "' + name + '": ' + m); }
+  if (!def || typeof def !== 'object' || Array.isArray(def)) { warn('write it like { "shape": "circle", "w": 20, "h": 20, "color": "gold" }'); def = {}; }
+  for (var k in def) if (!KNOWN[k]) warn('unknown setting "' + k + '" (put your own values inside "props")');
+  function num(v, d, label) {
+    if (v === undefined || v === null) return d;
+    if (typeof v !== 'number' || !isFinite(v)) { warn(label + ' should be a number'); return d; }
+    return v;
+  }
+  function str(v, d, label) {
+    if (v === undefined || v === null) return d;
+    if (typeof v !== 'string') { warn(label + ' should be text in quotes'); return d; }
+    return v;
+  }
+  function part(p, pre, dw, dh) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) { warn(pre + ' should look like { "shape": "circle", "w": 10, "h": 10 }'); p = {}; }
+    var shape = str(p.shape, 'rect', pre + 'shape');
+    if (SH.indexOf(shape) < 0) { warn('unknown shape "' + shape + '" (try: ' + SH.join(', ') + ')'); shape = 'rect'; }
+    return {
+      shape: shape,
+      x: num(p.x, 0, pre + 'x'), y: num(p.y, 0, pre + 'y'),
+      w: num(p.w, dw, pre + 'w'), h: num(p.h, dh, pre + 'h'),
+      color: str(p.color, '#cccccc', pre + 'color'), stroke: str(p.stroke, null, pre + 'stroke'),
+      lineWidth: num(p.lineWidth, 2, pre + 'lineWidth'), rotation: num(p.rotation, 0, pre + 'rotation'),
+      opacity: num(p.opacity, 1, pre + 'opacity'),
+      sides: Math.max(3, Math.round(num(p.sides, 6, pre + 'sides'))), points: Math.max(3, Math.round(num(p.points, 5, pre + 'points'))),
+      radius: Math.max(0, num(p.radius, 0, pre + 'radius')),
+      text: p.text === undefined || p.text === null ? '' : String(p.text), font: str(p.font, 'sans-serif', pre + 'font')
+    };
+  }
+  var single = !Array.isArray(def.parts);
+  var isText = single && def.shape === 'text';
+  var txtLen = def.text === undefined || def.text === null ? 0 : String(def.text).length;
+  var w = num(def.w, undefined, 'w'), h = num(def.h, undefined, 'h');
+  if (w === undefined && h === undefined) { h = isText ? 24 : 40; w = isText ? Math.max(h, h * 0.6 * txtLen) : 40; }
+  else if (h === undefined) { h = isText ? 24 : w; }
+  else if (w === undefined) { w = isText ? Math.max(h, h * 0.6 * txtLen) : h; }
+  var parts = [];
+  if (single) {
+    parts.push(part({ shape: def.shape, x: 0, y: 0, w: w, h: h, color: def.color, stroke: def.stroke, lineWidth: def.lineWidth, radius: def.radius, sides: def.sides, points: def.points, text: def.text, font: def.font }, '', w, h));
+  } else {
+    def.parts.forEach(function (p, i) { parts.push(part(p, 'parts[' + i + '] ', w, h)); });
+  }
+  var control = def.control === undefined || def.control === null ? null : def.control;
+  if (control !== null && ['move', 'pointer', 'both'].indexOf(control) < 0) { warn('control should be "move", "pointer" or "both"'); control = null; }
+  var edges = def.edges === undefined || def.edges === null ? null : def.edges;
+  if (edges !== null && ['stop', 'bounce', 'wrap', 'none'].indexOf(edges) < 0) { warn('edges should be "stop", "bounce", "wrap" or "none"'); edges = null; }
+  if (control && !edges) edges = 'stop';
+  var tags = def.tags === undefined || def.tags === null ? [] : (typeof def.tags === 'string' ? [def.tags] : def.tags);
+  if (!Array.isArray(tags)) { warn('tags should be a list like ["enemy", "red"]'); tags = []; }
+  tags = tags.filter(function (t) { return typeof t === 'string'; });
+  var props = def.props === undefined || def.props === null ? {} : def.props;
+  if (typeof props !== 'object' || Array.isArray(props)) { warn('props should look like { "speed": 100 }'); props = {}; }
+  return {
+    asset: {
+      name: name, w: w, h: h, parts: parts, props: props, tags: tags, control: control, edges: edges || 'none',
+      angle: num(def.rotation, 0, 'rotation'), opacity: num(def.opacity, 1, 'opacity'), z: num(def.z, 0, 'z'),
+      vx: num(def.vx, 0, 'vx'), vy: num(def.vy, 0, 'vy'), gravity: num(def.gravity, 0, 'gravity'), scale: num(def.scale, 1, 'scale')
+    },
+    warnings: warnings
+  };
+}
+
+// Draws an asset's shapes. The caller has already moved/rotated/scaled the canvas to the object.
+function drawParts(ctx, parts) {
+  function outline(p) {
+    var w = p.w, h = p.h, s = p.shape, i, n, a, r;
+    if (s === 'rect') {
+      r = Math.min(p.radius, Math.abs(w) / 2, Math.abs(h) / 2);
+      if (r > 0) {
+        ctx.moveTo(-w / 2 + r, -h / 2);
+        ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, r); ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, r);
+        ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, r); ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, r);
+        ctx.closePath();
+      } else ctx.rect(-w / 2, -h / 2, w, h);
+    } else if (s === 'circle' || s === 'ellipse') {
+      ctx.ellipse(0, 0, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2);
+    } else if (s === 'triangle') {
+      ctx.moveTo(0, -h / 2); ctx.lineTo(w / 2, h / 2); ctx.lineTo(-w / 2, h / 2); ctx.closePath();
+    } else if (s === 'diamond') {
+      ctx.moveTo(0, -h / 2); ctx.lineTo(w / 2, 0); ctx.lineTo(0, h / 2); ctx.lineTo(-w / 2, 0); ctx.closePath();
+    } else if (s === 'polygon') {
+      n = p.sides;
+      for (i = 0; i < n; i++) { a = -Math.PI / 2 + i * 2 * Math.PI / n; if (i) ctx.lineTo(Math.cos(a) * w / 2, Math.sin(a) * h / 2); else ctx.moveTo(Math.cos(a) * w / 2, Math.sin(a) * h / 2); }
+      ctx.closePath();
+    } else if (s === 'star') {
+      n = p.points;
+      for (i = 0; i < n * 2; i++) { a = -Math.PI / 2 + i * Math.PI / n; r = i % 2 ? 0.45 : 1; if (i) ctx.lineTo(Math.cos(a) * r * w / 2, Math.sin(a) * r * h / 2); else ctx.moveTo(Math.cos(a) * r * w / 2, Math.sin(a) * r * h / 2); }
+      ctx.closePath();
+    } else if (s === 'heart') {
+      ctx.moveTo(0, h * 0.4);
+      ctx.bezierCurveTo(-w * 0.6, -h * 0.05, -w * 0.3, -h * 0.5, 0, -h * 0.2);
+      ctx.bezierCurveTo(w * 0.3, -h * 0.5, w * 0.6, -h * 0.05, 0, h * 0.4);
+      ctx.closePath();
+    }
+  }
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i];
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    if (p.rotation) ctx.rotate(p.rotation * Math.PI / 180);
+    ctx.globalAlpha = ctx.globalAlpha * p.opacity;
+    if (p.shape === 'text') {
+      ctx.font = Math.max(1, p.h) + 'px ' + p.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ff00ff'; ctx.fillStyle = p.color;   // a bad color shows up magenta instead of silently reusing the last one
+      ctx.fillText(p.text, 0, 0);
+      if (p.stroke) { ctx.lineWidth = p.lineWidth; ctx.strokeStyle = '#ff00ff'; ctx.strokeStyle = p.stroke; ctx.strokeText(p.text, 0, 0); }
+    } else if (p.shape === 'line') {
+      ctx.beginPath(); ctx.moveTo(-p.w / 2, -p.h / 2); ctx.lineTo(p.w / 2, p.h / 2);
+      ctx.lineWidth = p.lineWidth; ctx.lineCap = 'round'; ctx.strokeStyle = '#ff00ff'; ctx.strokeStyle = p.stroke || p.color; ctx.stroke();
+    } else {
+      ctx.beginPath(); outline(p);
+      ctx.fillStyle = '#ff00ff'; ctx.fillStyle = p.color; ctx.fill();
+      if (p.stroke) { ctx.lineWidth = p.lineWidth; ctx.strokeStyle = '#ff00ff'; ctx.strokeStyle = p.stroke; ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+}
+
+// The game engine itself: runs inside the preview, before your JavaScript.
+function ENGINE(assetData) {
+  var W = window, doc = document, warned = {};
+  function warnOnce(m) { if (!warned[m]) { warned[m] = 1; console.warn(m); } }
+  function errOnce(m) { if (!warned[m]) { warned[m] = 1; console.error(m); } }
+  function where(e) { try { return W.__csLine ? W.__csLine(e && e.stack) : ''; } catch (x) { return ''; } }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function random(a, b) { if (a === undefined) return Math.random(); if (b === undefined) { b = a; a = 0; } return a + Math.random() * (b - a); }
+  function randomInt(a, b) { if (b === undefined) { b = a; a = 0; } return Math.floor(a + Math.random() * (b - a + 1)); }
+  function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function safe(label, fn, a, b) {
+    try { fn(a, b); return true; }
+    catch (e) { console.error('Error in ' + label + ': ' + (e && e.message ? e.message : e) + where(e) + ' (stopped so it does not repeat; fix it and press Run)'); return false; }
+  }
+
+  var assets = {};
+  Object.keys(assetData || {}).forEach(function (name) {
+    var r = normalizeAsset(name, assetData[name]);
+    r.warnings.forEach(warnOnce);
+    assets[name] = r.asset;
+  });
+
+  // ---- the screen ----
+  var cv = doc.createElement('canvas');
+  cv.id = '__csCanvas';
+  cv.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:-1;display:block';
+  doc.body.appendChild(cv);
+  doc.documentElement.style.touchAction = 'none';
+  doc.body.style.touchAction = 'none';
+  doc.body.style.userSelect = 'none';
+  doc.body.style.webkitUserSelect = 'none';
+  var ctx = cv.getContext('2d');
+
+  var world = {
+    width: 0, height: 0, background: '#14111f', fixedW: 0, fixedH: 0,
+    size: function (w, h) { world.fixedW = w; world.fixedH = h; fit(); },
+    fill: function () { world.fixedW = 0; world.fixedH = 0; fit(); }
+  };
+  var view = { scale: 1, ox: 0, oy: 0, cw: 0, ch: 0, dpr: 1 };
+  function fit() {
+    var cw = W.innerWidth, ch = W.innerHeight, dpr = W.devicePixelRatio || 1;
+    view.cw = cw; view.ch = ch; view.dpr = dpr;
+    cv.width = Math.max(1, Math.round(cw * dpr)); cv.height = Math.max(1, Math.round(ch * dpr));
+    if (world.fixedW > 0 && world.fixedH > 0) {
+      view.scale = Math.min(cw / world.fixedW, ch / world.fixedH);
+      view.ox = (cw - world.fixedW * view.scale) / 2; view.oy = (ch - world.fixedH * view.scale) / 2;
+      world.width = world.fixedW; world.height = world.fixedH;
+    } else { view.scale = 1; view.ox = 0; view.oy = 0; world.width = cw; world.height = ch; }
+  }
+  W.addEventListener('resize', fit);
+  fit();
+  function toWorld(sx, sy) { return { x: (sx - view.ox) / view.scale, y: (sy - view.oy) / view.scale }; }
+
+  // ---- objects ----
+  var objects = [], seq = 0;
+  function GameObject(a, x, y) {
+    this.id = ++seq;
+    this.name = a.name; this.tags = a.tags.slice();
+    this.x = x || 0; this.y = y || 0;
+    this.w = a.w; this.h = a.h; this.baseW = a.w; this.baseH = a.h;
+    this.scale = a.scale; this.angle = a.angle; this.opacity = a.opacity; this.visible = true; this.z = a.z;
+    this.vx = a.vx; this.vy = a.vy; this.gravity = a.gravity;
+    this.control = a.control; this.edges = a.edges; this.alive = true;
+    this.parts = JSON.parse(JSON.stringify(a.parts));
+    for (var k in a.props) {
+      if (k in this) { warnOnce('Asset "' + a.name + '": the property name "' + k + '" is already used by the engine, so it was skipped. Pick another name.'); continue; }
+      this[k] = JSON.parse(JSON.stringify(a.props[k]));
+    }
+  }
+  GameObject.prototype.destroy = function () { this.alive = false; };
+  GameObject.prototype.setSize = function (w, h) { this.w = w; this.h = h === undefined ? (this.baseW ? w * this.baseH / this.baseW : w) : h; return this; };
+  GameObject.prototype.grow = function (f) { this.scale *= f; return this; };
+  GameObject.prototype.moveTo = function (x, y) { this.x = x; this.y = y; return this; };
+  GameObject.prototype.distanceTo = function (o) { return distance(this, o); };
+  GameObject.prototype.touching = function (o) { return touching(this, o); };
+  GameObject.prototype.stayInWorld = function () {
+    var hw = this.w * this.scale / 2, hh = this.h * this.scale / 2;
+    this.x = clamp(this.x, hw, world.width - hw); this.y = clamp(this.y, hh, world.height - hh); return this;
+  };
+  Object.defineProperty(GameObject.prototype, 'r', { get: function () { return Math.max(this.w, this.h) / 2; }, set: function (v) { this.w = v * 2; this.h = v * 2; } });
+  Object.defineProperty(GameObject.prototype, 'color', {
+    get: function () { return this.parts.length ? this.parts[0].color : undefined; },
+    set: function (c) { for (var i = 0; i < this.parts.length; i++) this.parts[i].color = c; }
+  });
+  Object.defineProperty(GameObject.prototype, 'text', {
+    get: function () { return this.parts.length ? this.parts[0].text : undefined; },
+    set: function (t) { if (this.parts.length) this.parts[0].text = String(t); }
+  });
+
+  function resolve(src) {
+    if (typeof src === 'string') {
+      if (!Object.prototype.hasOwnProperty.call(assets, src)) {
+        var names = Object.keys(assets);
+        throw new Error('No asset named "' + src + '". ' + (names.length ? 'Your assets are: ' + names.join(', ') + ' (names are case-sensitive).' : 'The Assets tab is empty or has a mistake.'));
+      }
+      return assets[src];
+    }
+    if (src && typeof src === 'object') { var r = normalizeAsset(src.name || 'object', src); r.warnings.forEach(warnOnce); return r.asset; }
+    throw new Error('spawn() needs an asset name, like spawn("coin", 100, 100)');
+  }
+  function spawn(src, x, y, overrides) {
+    var o = new GameObject(resolve(src), x, y);
+    if (overrides) for (var k in overrides) o[k] = overrides[k];
+    objects.push(o);
+    return o;
+  }
+  function matches(o, k) { return k === undefined || o.name === k || o.tags.indexOf(k) >= 0; }
+  function findAll(k) { return objects.filter(function (o) { return o.alive && matches(o, k); }); }
+  function find(k) { for (var i = 0; i < objects.length; i++) if (objects[i].alive && matches(objects[i], k)) return objects[i]; return null; }
+  function isRound(o) { var s = o.parts[0] && o.parts[0].shape; return s === 'circle' || s === 'ellipse'; }
+  function touching(a, b) {
+    if (!a || !b || a === b || !a.alive || !b.alive) return false;
+    var aw = a.w * a.scale, ah = a.h * a.scale, bw = b.w * b.scale, bh = b.h * b.scale;
+    if (isRound(a) && isRound(b)) { var dx = a.x - b.x, dy = a.y - b.y, r = (aw + ah) / 4 + (bw + bh) / 4; return dx * dx + dy * dy < r * r; }
+    return Math.abs(a.x - b.x) < (aw + bw) / 2 && Math.abs(a.y - b.y) < (ah + bh) / 2;
+  }
+  function applyEdges(o) {
+    var m = o.edges;
+    if (!m || m === 'none') return;
+    var hw = o.w * o.scale / 2, hh = o.h * o.scale / 2, WW = world.width, HH = world.height;
+    if (m === 'wrap') {
+      if (o.x < -hw) o.x = WW + hw; else if (o.x > WW + hw) o.x = -hw;
+      if (o.y < -hh) o.y = HH + hh; else if (o.y > HH + hh) o.y = -hh;
+      return;
+    }
+    if (o.x < hw) { o.x = hw; if (m === 'bounce') o.vx = Math.abs(o.vx); else if (o.vx < 0) o.vx = 0; }
+    else if (o.x > WW - hw) { o.x = WW - hw; if (m === 'bounce') o.vx = -Math.abs(o.vx); else if (o.vx > 0) o.vx = 0; }
+    if (o.y < hh) { o.y = hh; if (m === 'bounce') o.vy = Math.abs(o.vy); else if (o.vy < 0) o.vy = 0; }
+    else if (o.y > HH - hh) { o.y = HH - hh; if (m === 'bounce') o.vy = -Math.abs(o.vy); else if (o.vy > 0) o.vy = 0; }
+  }
+
+  // ---- input: keyboard, touch controls, pointer ----
+  var keys = {}, touches = {}, padNow = {}, btnNow = {}, prevIn = {};
+  var input = { left: false, right: false, up: false, down: false, A: false, B: false, x: 0, y: 0, buttons: {}, just: {}, pointer: { x: 0, y: 0, down: false }, key: function (k) { return !!keys[String(k).toLowerCase()]; } };
+  var controls = function (opts) {
+    opts = opts || {};
+    if (opts.dpad === false) controls.dpad.enabled = false;
+    else if (opts.dpad) {
+      var d = opts.dpad === true ? {} : opts.dpad;
+      controls.dpad.enabled = true;
+      if (d.size) controls.dpad.size = d.size;
+      if (d.x !== undefined) controls.dpad.x = d.x;
+      if (d.y !== undefined) controls.dpad.y = d.y;
+    }
+    if (opts.buttons) {
+      controls.buttons = opts.buttons.map(function (b) {
+        b = typeof b === 'string' ? { name: b } : b;
+        return { name: b.name, size: b.size || opts.buttonSize || 64, x: b.x, y: b.y };
+      });
+    }
+    if (opts.opacity !== undefined) controls.opacity = opts.opacity;
+  };
+  controls.dpad = { enabled: false, size: 130, x: undefined, y: undefined };
+  controls.buttons = [];
+  controls.opacity = 1;
+
+  function layout() {
+    var m = 16, out = { dp: null, bs: [] }, d = controls.dpad;
+    if (d.enabled) { var r = d.size / 2; out.dp = { cx: d.x !== undefined ? d.x : m + r, cy: view.ch - (d.y !== undefined ? d.y : m + r), r: r }; }
+    var rx = view.cw - m;
+    controls.buttons.forEach(function (b) {
+      var br = b.size / 2, cx = b.x !== undefined ? view.cw - b.x : rx - br;
+      rx -= b.size + 12;
+      out.bs.push({ name: b.name, cx: cx, cy: view.ch - (b.y !== undefined ? b.y : m + br), r: br });
+    });
+    return out;
+  }
+  function isUi(t) { return !!(t && t.closest && t.closest('button,a,input,select,textarea,label')); }
+  function noTyping(e) { var t = e.target && e.target.tagName; return !(t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT'); }
+  W.addEventListener('keydown', function (e) {
+    if (!noTyping(e)) return;
+    var k = String(e.key).toLowerCase(); keys[k] = true;
+    if (k.indexOf('arrow') === 0 || k === ' ') e.preventDefault();
+  });
+  W.addEventListener('keyup', function (e) { keys[String(e.key).toLowerCase()] = false; });
+  W.addEventListener('blur', function () { keys = {}; touches = {}; input.pointer.down = false; });
+  W.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  W.addEventListener('pointerdown', function (e) {
+    if (isUi(e.target)) return;
+    var l = layout(), hit = null, i;
+    if (l.dp && Math.hypot(e.clientX - l.dp.cx, e.clientY - l.dp.cy) < l.dp.r * 1.3) hit = { kind: 'dpad' };
+    else for (i = 0; i < l.bs.length; i++) { if (Math.hypot(e.clientX - l.bs[i].cx, e.clientY - l.bs[i].cy) < l.bs[i].r * 1.2) { hit = { kind: 'btn', name: l.bs[i].name }; tapped[hit.name] = true; break; } }
+    var t = hit || { kind: 'world' };
+    t.x = e.clientX; t.y = e.clientY; touches[e.pointerId] = t;
+    if (t.kind === 'world') { var p = toWorld(e.clientX, e.clientY); input.pointer.x = p.x; input.pointer.y = p.y; input.pointer.down = true; }
+  });
+  W.addEventListener('pointermove', function (e) {
+    var t = touches[e.pointerId]; if (!t) return;
+    t.x = e.clientX; t.y = e.clientY;
+    if (t.kind === 'world') { var p = toWorld(e.clientX, e.clientY); input.pointer.x = p.x; input.pointer.y = p.y; }
+  });
+  function release(e) {
+    delete touches[e.pointerId];
+    var any = false; for (var id in touches) if (touches[id].kind === 'world') any = true;
+    input.pointer.down = any;
+  }
+  W.addEventListener('pointerup', release);
+  W.addEventListener('pointercancel', release);
+
+  var tapped = {};
+  function computeInput() {
+    var l = layout(), pad = { left: false, right: false, up: false, down: false }, btns = {}, id, t, k;
+    for (id in touches) {
+      t = touches[id];
+      if (t.kind === 'dpad' && l.dp) {
+        var dx = t.x - l.dp.cx, dy = t.y - l.dp.cy, th = l.dp.r * 0.3;
+        if (dx < -th) pad.left = true; if (dx > th) pad.right = true; if (dy < -th) pad.up = true; if (dy > th) pad.down = true;
+      } else if (t.kind === 'btn') btns[t.name] = true;
+    }
+    for (k in tapped) btns[k] = true;   // a tap shorter than one frame still counts
+    tapped = {};
+    padNow = pad; btnNow = btns;
+    var now = {
+      left: !!(keys.arrowleft || keys.a || pad.left), right: !!(keys.arrowright || keys.d || pad.right),
+      up: !!(keys.arrowup || keys.w || pad.up), down: !!(keys.arrowdown || keys.s || pad.down),
+      A: !!(keys[' '] || keys.z || btns.A), B: !!(keys.x || keys.shift || btns.B)
+    };
+    for (k in now) { input.just[k] = now[k] && !prevIn[k]; input[k] = now[k]; prevIn[k] = now[k]; }
+    input.x = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    input.y = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+    input.buttons = btns;
+  }
+
+  // ---- timers, callbacks, the game loop ----
+  var updates = [], draws = [], rules = [], timers = [], hudText = '', last = performance.now();
+  function onUpdate(fn) { updates.push(fn); return fn; }
+  function onDraw(fn) { draws.push(fn); return fn; }
+  function onTouch(a, b, fn) { rules.push({ a: a, b: b, fn: fn }); }
+  function after(sec, fn) { var t = { t: sec, fn: fn, rep: 0, dead: false }; timers.push(t); return { stop: function () { t.dead = true; } }; }
+  function every(sec, fn) { var t = { t: sec, fn: fn, rep: Math.max(0.01, sec), dead: false }; timers.push(t); return { stop: function () { t.dead = true; } }; }
+  function hud() { hudText = Array.prototype.join.call(arguments, ' '); }
+
+  function step(dt) {
+    computeInput();
+    timers.slice().forEach(function (t) {
+      if (t.dead) return;
+      t.t -= dt;
+      var guard = 0;
+      while (t.t <= 0 && !t.dead && guard++ < 5) {
+        if (!safe(t.rep ? 'every()' : 'after()', t.fn)) { t.dead = true; break; }
+        if (t.rep) t.t += t.rep; else t.dead = true;
+      }
+    });
+    timers = timers.filter(function (t) { return !t.dead; });
+
+    objects.forEach(function (o) {
+      if (!o.alive || !o.control) return;
+      var sp = typeof o.speed === 'number' ? o.speed : 200, moved = false;
+      if ((o.control === 'move' || o.control === 'both') && (input.x || input.y)) {
+        var len = Math.hypot(input.x, input.y);
+        o.x += input.x / len * sp * dt; o.y += input.y / len * sp * dt; moved = true;
+      }
+      if (!moved && (o.control === 'pointer' || o.control === 'both') && input.pointer.down) {
+        var px = input.pointer.x - o.x, py = input.pointer.y - o.y, d = Math.hypot(px, py);
+        if (d > 4) { var st = Math.min(sp * dt, d); o.x += px / d * st; o.y += py / d * st; }
+      }
+    });
+
+    updates.slice().forEach(function (fn) {
+      if (updates.indexOf(fn) < 0) return;
+      if (!safe('onUpdate()', fn, dt)) { var k = updates.indexOf(fn); if (k >= 0) updates.splice(k, 1); }
+    });
+
+    rules.slice().forEach(function (rule) {
+      if (rules.indexOf(rule) < 0) return;
+      var A = findAll(rule.a), B = findAll(rule.b), i, j, bad = false;
+      for (i = 0; i < A.length && !bad; i++) for (j = 0; j < B.length && !bad; j++) {
+        if (A[i].alive && B[j].alive && touching(A[i], B[j])) {
+          if (!safe('onTouch("' + rule.a + '", "' + rule.b + '")', rule.fn, A[i], B[j])) bad = true;
+        }
+      }
+      if (bad) { var k = rules.indexOf(rule); if (k >= 0) rules.splice(k, 1); }
+    });
+
+    objects.forEach(function (o) {
+      if (!o.alive) return;
+      if (o.gravity) o.vy += o.gravity * dt;
+      o.x += o.vx * dt; o.y += o.vy * dt;
+      applyEdges(o);
+    });
+    for (var n = objects.length - 1; n >= 0; n--) if (!objects[n].alive) objects.splice(n, 1);
+  }
+
+  function drawHud() {
+    if (!hudText) return;
+    ctx.font = '700 18px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    var lines = hudText.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(lines[i], 15, 13 + i * 24);
+      ctx.fillStyle = '#ffffff'; ctx.fillText(lines[i], 14, 12 + i * 24);
+    }
+  }
+  function drawControls() {
+    var l = layout(), a = controls.opacity;
+    ctx.save();
+    if (l.dp) {
+      var d = l.dp;
+      ctx.globalAlpha = 0.9 * a; ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(d.cx, d.cy, d.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      [['right', 0], ['down', Math.PI / 2], ['left', Math.PI], ['up', -Math.PI / 2]].forEach(function (dir) {
+        ctx.save(); ctx.translate(d.cx, d.cy); ctx.rotate(dir[1]);
+        ctx.fillStyle = padNow[dir[0]] ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.45)';
+        ctx.beginPath(); ctx.moveTo(d.r * 0.74, 0); ctx.lineTo(d.r * 0.46, -d.r * 0.17); ctx.lineTo(d.r * 0.46, d.r * 0.17); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      });
+    }
+    l.bs.forEach(function (b) {
+      ctx.globalAlpha = a; ctx.fillStyle = btnNow[b.name] ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.16)'; ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.cx, b.cy, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '700 ' + Math.round(b.r * 0.7) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(b.name), b.cx, b.cy);
+    });
+    ctx.restore();
+  }
+  function render() {
+    var k = view.dpr, fixed = world.fixedW > 0 && world.fixedH > 0;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = world.background || '#000000';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.setTransform(k * view.scale, 0, 0, k * view.scale, k * view.ox, k * view.oy);
+    ctx.save();
+    if (fixed) { ctx.beginPath(); ctx.rect(0, 0, world.width, world.height); ctx.clip(); }
+    var list = objects.filter(function (o) { return o.alive && o.visible && o.opacity > 0; });
+    list.sort(function (a, b) { return (a.z - b.z) || (a.id - b.id); });
+    list.forEach(function (o) {
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      if (o.angle) ctx.rotate(o.angle * Math.PI / 180);
+      ctx.scale(o.baseW ? o.w * o.scale / o.baseW : 1, o.baseH ? o.h * o.scale / o.baseH : 1);
+      ctx.globalAlpha = Math.max(0, Math.min(1, o.opacity));
+      drawParts(ctx, o.parts);
+      ctx.restore();
+    });
+    draws.slice().forEach(function (fn) {
+      if (draws.indexOf(fn) < 0) return;
+      ctx.save();
+      var ok = safe('onDraw()', fn, ctx);
+      ctx.restore();
+      if (!ok) { var q = draws.indexOf(fn); if (q >= 0) draws.splice(q, 1); }
+    });
+    ctx.restore();
+    if (fixed) { ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, world.width - 1, world.height - 1); }
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    drawHud(); drawControls();
+  }
+  function frame(now) {
+    var dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+    try { step(dt); render(); } catch (e) { errOnce('Engine error: ' + (e && e.message ? e.message : e) + where(e)); }
+    W.requestAnimationFrame(frame);
+  }
+  W.requestAnimationFrame(frame);
+
+  W.world = world; W.objects = objects; W.spawn = spawn; W.find = find; W.findAll = findAll; W.touching = touching;
+  W.onUpdate = onUpdate; W.onDraw = onDraw; W.onTouch = onTouch; W.after = after; W.every = every;
+  W.input = input; W.controls = controls; W.hud = hud;
+  W.random = random; W.randomInt = randomInt; W.clamp = clamp; W.distance = distance;
+}
+
+// Runs INSIDE the preview, first. Sends console output and errors back to this page.
+function BOOT(jsStart, jsLines) {
+  function send(kind, text) { try { parent.postMessage({ __cs: 1, kind: kind, text: text }, '*'); } catch (e) {} }
+  function fmt(a) { if (typeof a === 'string') return a; try { var s = JSON.stringify(a); return s === undefined ? String(a) : s; } catch (e) { return String(a); } }
+  ['log', 'info', 'warn', 'error'].forEach(function (k) {
+    var orig = console[k];
+    console[k] = function () { send(k, Array.prototype.map.call(arguments, fmt).join(' ')); try { orig.apply(console, arguments); } catch (e) {} };
+  });
+  window.alert = function (msg) { send('log', '[alert] ' + msg); };
+  function where(line) {
+    if (!line) return '';
+    if (line >= jsStart && line < jsStart + jsLines) return ' (JavaScript line ' + (line - jsStart + 1) + ')';
+    return ' (HTML line ' + line + ')';
+  }
+  window.__csLine = function (stack) {
+    var re = /:(\d+):\d+/g, m;
+    while ((m = re.exec(String(stack || '')))) {
+      var l = +m[1];
+      if (l >= jsStart && l < jsStart + jsLines) return ' (JavaScript line ' + (l - jsStart + 1) + ')';
+    }
+    return '';
+  };
+  window.addEventListener('error', function (e) { var u = e.error && e.error.stack ? window.__csLine(e.error.stack) : ''; send('error', e.message + (u || where(e.lineno))); });
+  window.addEventListener('unhandledrejection', function (e) { send('error', 'Unhandled promise rejection: ' + ((e.reason && e.reason.message) || e.reason)); });
+}
+
+// =====================================================================
+// Assets tab text: "relaxed JSON" (comments, trailing commas, unquoted
+// names and 'single quotes' are all fine). Written by hand instead of
+// using eval, so nothing typed in the Assets tab can ever run on this page.
+// It also remembers where each value sits in the text, so the gallery can
+// change one color or number without touching anything else.
+// =====================================================================
+function parseRelaxed(src) {
+  let i = 0;
+  const ranges = new Map(), objs = new Map();
+  const key = path => path.join('\u0001');
+  function fail(msg, at) {
+    if (at === undefined) at = i;
+    let line = 1, col = 1;
+    for (let k = 0; k < at && k < src.length; k++) { if (src[k] === '\n') { line++; col = 1; } else col++; }
+    const e = new Error('line ' + line + ', column ' + col + ': ' + msg);
+    e.line = line; e.col = col;
+    throw e;
+  }
+  function ws() {
+    for (;;) {
+      const c = src[i];
+      if (c === ' ' || c === '\n' || c === '\t' || c === '\r') i++;
+      else if (c === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') i++; }
+      else if (c === '/' && src[i + 1] === '*') {
+        const j = src.indexOf('*/', i + 2);
+        if (j < 0) fail('this comment never ends (it needs */ at the end)');
+        i = j + 2;
+      } else break;
+    }
+  }
+  function str() {
+    const q = src[i], start = i;
+    i++;
+    let out = '';
+    for (;;) {
+      if (i >= src.length || src[i] === '\n') fail('this text is missing its closing quote (' + q + ')', start);
+      const c = src[i];
+      if (c === q) { i++; return out; }
+      if (c === '\\') {
+        const n = src[i + 1];
+        i += 2;
+        if (n === 'n') out += '\n'; else if (n === 't') out += '\t'; else if (n === 'r') out += '\r';
+        else if (n === 'u') {
+          const hex = src.slice(i, i + 4);
+          if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail('a \\u escape needs 4 hex digits');
+          out += String.fromCharCode(parseInt(hex, 16)); i += 4;
+        } else if (n === undefined) fail('this text is missing its closing quote (' + q + ')', start);
+        else out += n;
+      } else { out += c; i++; }
+    }
+  }
+  const NUM = /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/y;
+  function value(path) {
+    ws();
+    const c = src[i], start = i;
+    if (c === undefined) fail('expected a value here, but the text ended');
+    if (c === '{') return object(path);
+    if (c === '[') return array(path);
+    let v;
+    if (c === '"' || c === "'") v = str();
+    else if (/[-+.\d]/.test(c)) {
+      NUM.lastIndex = i;
+      const m = NUM.exec(src);
+      if (!m) fail('this does not look like a number');
+      i += m[0].length; v = Number(m[0]);
+    } else {
+      const m = /^[^\s,\]}:]+/.exec(src.slice(i, i + 60));
+      const word = m ? m[0] : c;
+      if (word === 'true') { i += 4; v = true; }
+      else if (word === 'false') { i += 5; v = false; }
+      else if (word === 'null') { i += 4; v = null; }
+      else fail('"' + word + '" needs quotes around it if it is text, like "' + word + '"');
+    }
+    ranges.set(key(path), [start, i]);
+    return v;
+  }
+  function object(path) {
+    const open = i;
+    i++;
+    const out = {};
+    let lastEnd = i, any = false;
+    for (;;) {
+      ws();
+      if (i >= src.length) fail('this { was never closed (a } is missing)', open);
+      if (src[i] === '}') { i++; break; }
+      let k;
+      if (src[i] === '"' || src[i] === "'") k = str();
+      else {
+        const m = /^[A-Za-z_$][\w$-]*/.exec(src.slice(i, i + 80));
+        if (!m) fail('expected a name here, like "color"');
+        k = m[0]; i += k.length;
+      }
+      if (k === '__proto__') fail('that name is not allowed');
+      ws();
+      if (src[i] !== ':') fail('expected ":" after "' + k + '"');
+      i++;
+      out[k] = value(path.concat(k));
+      any = true; lastEnd = i;
+      ws();
+      if (src[i] === ',') { i++; continue; }
+      if (src[i] === '}') { i++; break; }
+      if (i >= src.length) fail('this { was never closed (a } is missing)', open);
+      fail('expected "," or "}" here (is a comma missing?)');
+    }
+    objs.set(key(path), { insertAt: any ? lastEnd : open + 1, hasMembers: any });
+    return out;
+  }
+  function array(path) {
+    const open = i;
+    i++;
+    const out = [];
+    for (;;) {
+      ws();
+      if (i >= src.length) fail('this [ was never closed (a ] is missing)', open);
+      if (src[i] === ']') { i++; break; }
+      out.push(value(path.concat(String(out.length))));
+      ws();
+      if (src[i] === ',') { i++; continue; }
+      if (src[i] === ']') { i++; break; }
+      if (i >= src.length) fail('this [ was never closed (a ] is missing)', open);
+      fail('expected "," or "]" here (is a comma missing?)');
+    }
+    return out;
+  }
+  ws();
+  if (i >= src.length) return { value: {}, ranges, objs, rootEmpty: true, insertAt: 0, hasMembers: false };
+  if (src[i] !== '{') fail('the Assets tab should start with { and hold one entry per asset');
+  const value0 = object([]);
+  ws();
+  if (i < src.length) fail('there is extra text after the closing }');
+  const root = objs.get('');
+  return { value: value0, ranges, objs, rootEmpty: false, insertAt: root.insertAt, hasMembers: root.hasMembers };
+}
+
 // ---- state: one independent synced document per tab ----
-let ws, id = '', ready = false, active = 'html';
+let ws, id = '', ready = false, active = 'html', rightView = 'preview';
 const files = {};
 for (const t of TABS) files[t.k] = { doc: '', v: 0, outstanding: [], buffer: [], sel: [0, 0], scroll: [0, 0] };
 let peers = {}, cursors = {};   // cursors[id] = { lang, s, e }
@@ -226,6 +905,7 @@ ed.addEventListener('input', () => {
   flush(lang);
   sendCursor();
   redraw();
+  docChanged(lang);
 });
 function flush(lang) {
   const F = files[lang];
@@ -247,9 +927,37 @@ function remote(lang, m) {
   } else F.sel = [s, e];
   if (F.outstanding.length) sendOps(lang);
   redraw();
+  docChanged(lang);
 }
 
-// ---- tabs ----
+// Replace a whole document from code (not typing), e.g. when the gallery recolors something.
+// Only the changed stretch of text is sent, exactly like typing it would.
+function diffOps(doc, n) {
+  const m = Math.min(doc.length, n.length);
+  let i = 0; while (i < m && doc[i] === n[i]) i++;
+  let e = 0; while (e < m - i && doc[doc.length - 1 - e] === n[n.length - 1 - e]) e++;
+  const del = doc.length - i - e, ins = n.slice(i, n.length - e), ops = [];
+  if (del) ops.push({ t: 'd', p: i, n: del });
+  if (ins) ops.push({ t: 'i', p: i, s: ins });
+  return ops;
+}
+function commitLocal(lang, n) {
+  const F = files[lang];
+  const ops = diffOps(F.doc, n);
+  if (!ops.length) return;
+  if (lang === active) {
+    let s = ed.selectionStart, e = ed.selectionEnd;
+    for (const o of ops) { s = moveCursor(s, o); e = moveCursor(e, o); }
+    const top = ed.scrollTop;
+    ed.value = n; ed.setSelectionRange(s, e); ed.scrollTop = top;
+  }
+  ops.forEach(o => shiftCursors(lang, o));
+  F.buffer.push(...ops);
+  F.doc = n;
+  flush(lang); sendCursor(); redraw(); docChanged(lang);
+}
+
+// ---- tabs and the right-hand panel ----
 const tabsEl = $('#tabs');
 for (const t of TABS) {
   const b = document.createElement('button');
@@ -262,6 +970,13 @@ function updateTabsUI() {
   for (const t of TABS) $('#tab-' + t.k).setAttribute('aria-selected', String(t.k === active));
   ed.setAttribute('aria-label', langLabel(active) + ' code editor');
 }
+function updateRightPanel() {
+  const g = rightView === 'gallery';
+  $('#outWeb').classList.toggle('hide', g);
+  $('#outAssets').classList.toggle('hide', !g);
+  $('#toAssets').classList.toggle('hide', active !== 'assets');
+  if (g) { exitFull(); refreshGallery(); }
+}
 function switchTo(lang) {
   if (lang === active) return;
   const cur0 = files[active];
@@ -271,9 +986,12 @@ function switchTo(lang) {
   ed.value = F.doc;
   ed.setSelectionRange(Math.min(F.sel[0], F.doc.length), Math.min(F.sel[1], F.doc.length));
   ed.scrollTop = F.scroll[0]; ed.scrollLeft = F.scroll[1];
-  updateTabsUI(); sendCursor(); redraw();
+  rightView = lang === 'assets' ? 'gallery' : 'preview';
+  updateTabsUI(); updateRightPanel(); sendCursor(); redraw();
 }
 updateTabsUI();
+$('#gPreview').onclick = () => { rightView = 'preview'; updateRightPanel(); };
+$('#toAssets').onclick = () => { rightView = 'gallery'; updateRightPanel(); };
 
 // ---- other people's cursors (only drawn for the file you're looking at) ----
 const cur = $('#cur'), mir = $('#mir');
@@ -321,7 +1039,7 @@ function connect() {
       const F = files[m.lang]; if (!F) return;
       F.v = m.v; F.doc = m.doc; F.outstanding = []; F.buffer = [];
       if (m.lang === active) ed.value = F.doc;
-      ready = true; setState('live', true); redraw();
+      ready = true; setState('live', true); redraw(); docChanged(m.lang);
     } else if (m.type === 'op') {
       const F = files[m.lang]; if (!F) return;
       if (m.id === id) { F.v = m.v; F.outstanding = []; flush(m.lang); sendCursor(); } else remote(m.lang, m);
@@ -339,32 +1057,13 @@ function connect() {
 }
 setInterval(() => { if (ready) wsSend({ type: 'ping', t: performance.now() }); }, 2000);
 
-// ---- Run: stop everything, put HTML + CSS + JavaScript together, run it ----
+// ---- Run: stop everything, put HTML + CSS + JavaScript + Assets together, run it ----
 // The page runs in a sandboxed frame (no allow-same-origin): it can run
 // scripts and report back with postMessage, but it can't see your login or
 // anything else on this site.
 const preview = $('#preview'), consoleEl = $('#console'), outWeb = $('#outWeb');
-
-// Runs INSIDE the frame (its source is pasted in, so it can't use anything from this page).
-function BOOT(jsStart, jsLines) {
-  function send(kind, text) { try { parent.postMessage({ __cs: 1, kind: kind, text: text }, '*'); } catch (e) {} }
-  function fmt(a) { if (typeof a === 'string') return a; try { var s = JSON.stringify(a); return s === undefined ? String(a) : s; } catch (e) { return String(a); } }
-  ['log', 'info', 'warn', 'error'].forEach(function (k) {
-    var orig = console[k];
-    console[k] = function () { send(k, Array.prototype.map.call(arguments, fmt).join(' ')); try { orig.apply(console, arguments); } catch (e) {} };
-  });
-  window.alert = function (msg) { send('log', '[alert] ' + msg); };
-  function where(line) {
-    if (!line) return '';
-    if (line >= jsStart && line < jsStart + jsLines) return ' (JavaScript line ' + (line - jsStart + 1) + ')';
-    return ' (HTML line ' + line + ')';
-  }
-  window.addEventListener('error', function (e) { send('error', e.message + where(e.lineno)); });
-  window.addEventListener('unhandledrejection', function (e) { send('error', 'Unhandled promise rejection: ' + ((e.reason && e.reason.message) || e.reason)); });
-}
-
 let runCount = 0;
-function buildPreview(html, css, js) {
+function buildPreview(html, css, js, assetObj) {
   const safeJs = js.replace(/<\/script/gi, '<\\/script');
   const styleTag = '<style>\n' + css.replace(/<\/style/gi, '<\\/style') + '\n</style>';
   const jsLines = js.split('\n').length;
@@ -372,20 +1071,25 @@ function buildPreview(html, css, js) {
   const before = bodyEnd >= 0 ? html.slice(0, bodyEnd) : html;
   const after = bodyEnd >= 0 ? html.slice(bodyEnd) : '';
   const bootSrc = BOOT.toString();
+  const assetsJson = JSON.stringify(assetObj || {}).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  const engineSrc = 'var normalizeAsset=' + normalizeAsset.toString() + ';var drawParts=' + drawParts.toString() + ';(' + ENGINE.toString() + ')(' + assetsJson + ');';
   const nl = s => (s.match(/\n/g) || []).length;
-  // Everything added ahead of the JavaScript pushes it down; count that so
-  // errors can be reported against the line numbers in the JavaScript tab.
-  const jsStart = nl(before) + nl(bootSrc) + nl(styleTag) + 2;
-  const boot = '<script>(' + bootSrc + ')(' + jsStart + ',' + jsLines + ');<\/script>';
   // The helper goes right after <head> (so the doctype stays first); the CSS
   // goes just before </head> so it wins over earlier styles.
   const hit = before.match(/<head(\s[^>]*)?>/i) || before.match(/<html(\s[^>]*)?>/i) || before.match(/<!doctype[^>]*>/i);
   const at = hit ? hit.index + hit[0].length : 0;
   const headEnd = before.search(/<\/head\s*>/i);
-  const pre = headEnd >= at
-    ? before.slice(0, at) + boot + before.slice(at, headEnd) + styleTag + before.slice(headEnd)
-    : before.slice(0, at) + boot + styleTag + before.slice(at);
-  return pre + '<script>\n' + safeJs + '\n<\/script>\n' + after + '\n<' + '!-- run ' + (++runCount) + ' -->';
+  const head = start => {
+    const boot = '<script>(' + bootSrc + ')(' + start + ',' + jsLines + ');<\/script>';
+    return headEnd >= at
+      ? before.slice(0, at) + boot + before.slice(at, headEnd) + styleTag + before.slice(headEnd)
+      : before.slice(0, at) + boot + styleTag + before.slice(at);
+  };
+  // The engine sits between your HTML and your JavaScript. Count every line
+  // above your code so errors can name the line in the JavaScript tab.
+  const tail = '<script>' + engineSrc + '<\/script>\n<script>\n';
+  const jsStart = nl(head(0) + tail) + 1;
+  return head(jsStart) + tail + safeJs + '\n<\/script>\n' + after + '\n<' + '!-- run ' + (++runCount) + ' -->';
 }
 function logLine(kind, text) {
   const line = document.createElement('div');
@@ -405,14 +1109,191 @@ addEventListener('message', ev => {
 function runProject(by) {
   consoleEl.textContent = '';
   if (by) logLine('info', '▶ ' + by + ' ran the project');
-  preview.srcdoc = buildPreview(files.html.doc, files.css.doc, files.js.doc);   // replacing the page stops whatever was running
+  let assetObj = {};
+  try { assetObj = parseRelaxed(files.assets.doc).value; }
+  catch (e) { logLine('error', 'Assets tab: ' + e.message + ' (running without your assets)'); }
+  preview.srcdoc = buildPreview(files.html.doc, files.css.doc, files.js.doc, assetObj);   // replacing the page stops whatever was running
   if (!by) preview.focus();
 }
 function exitFull() { outWeb.classList.remove('full'); $('#fs').textContent = 'Fullscreen'; }
 $('#fs').onclick = () => { const on = outWeb.classList.toggle('full'); $('#fs').textContent = on ? 'Exit fullscreen' : 'Fullscreen'; };
 
+// =====================================================================
+// The Assets gallery: every asset drawn, with controls to resize it,
+// change its shapes and colors, and add or edit its properties. Each
+// change is a small edit to the Assets text, so it syncs like typing.
+// =====================================================================
+let galleryTimer = null;
+function docChanged(lang) { if (lang === 'assets' && rightView === 'gallery') { clearTimeout(galleryTimer); galleryTimer = setTimeout(refreshGallery, 120); } }
+const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const pkey = path => path.join('\u0001');
+const scratch = document.createElement('canvas').getContext('2d');
+function toHex(c) {
+  scratch.fillStyle = '#000000'; scratch.fillStyle = c;
+  const v = String(scratch.fillStyle);
+  if (v[0] === '#') return v.length === 7 ? v : '#000000';
+  const m = v.match(/[\d.]+/g);
+  return m && m.length >= 3 ? '#' + m.slice(0, 3).map(n => Math.round(+n).toString(16).padStart(2, '0')).join('') : '#000000';
+}
+function drawThumb(canvas, asset) {
+  const ctx = canvas.getContext('2d'), S = canvas.width;
+  ctx.clearRect(0, 0, S, S);
+  const k = Math.min(3, (S - 20) / Math.max(asset.w, 1), (S - 20) / Math.max(asset.h, 1));
+  ctx.save(); ctx.translate(S / 2, S / 2); ctx.scale(k, k);
+  drawParts(ctx, asset.parts);
+  ctx.restore();
+}
+// Change one value in the Assets text (found fresh each time, so it is never out of date).
+function editValue(path, rawText) {
+  let p; try { p = parseRelaxed(files.assets.doc); } catch (e) { return false; }
+  const r = p.ranges.get(pkey(path));
+  if (!r) return false;
+  const t = files.assets.doc;
+  commitLocal('assets', t.slice(0, r[0]) + rawText + t.slice(r[1]));
+  return true;
+}
+// Add  "key": value  inside the { } found at objPath.
+function addMember(objPath, key, rawValue) {
+  let p; try { p = parseRelaxed(files.assets.doc); } catch (e) { return false; }
+  const o = p.objs.get(pkey(objPath));
+  if (!o) return false;
+  const t = files.assets.doc, member = JSON.stringify(key) + ': ' + rawValue;
+  commitLocal('assets', t.slice(0, o.insertAt) + (o.hasMembers ? ', ' + member : ' ' + member + ' ') + t.slice(o.insertAt));
+  return true;
+}
+function numField(label, path, value, min) {
+  const w = h('label', 'fld'); w.append(label + ' ');
+  const inp = h('input'); inp.type = 'number'; inp.value = String(value); inp.step = 'any';
+  if (min !== undefined) inp.min = String(min);
+  inp.onchange = () => { const v = Number(inp.value); if (inp.value !== '' && isFinite(v)) editValue(path, String(v)); };
+  w.append(inp);
+  return w;
+}
+function colorField(label, path, current) {
+  const w = h('label', 'fld'); w.append(label + ' ');
+  const c = h('input'); c.type = 'color'; c.value = toHex(current);
+  c.onchange = () => editValue(path, JSON.stringify(c.value));
+  w.append(c);
+  return w;
+}
+function shapeSelect(path, current) {
+  const s = h('select', 'sel'), list = SHAPE_LIST.includes(current) ? SHAPE_LIST : SHAPE_LIST.concat(current);
+  for (const o of list) { const op = h('option', '', o); op.value = o; s.append(op); }
+  s.value = current;
+  s.onchange = () => editValue(path, JSON.stringify(s.value));
+  return s;
+}
+function buildCard(name, p) {
+  const def = p.value[name];
+  const { asset, warnings } = normalizeAsset(name, def);
+  const has = path => p.ranges.has(pkey(path));
+  const isObj = def && typeof def === 'object' && !Array.isArray(def);
+  const card = h('div', 'card');
+  const thumb = h('canvas', 'thumb'); thumb.width = 152; thumb.height = 152;
+  drawThumb(thumb, asset);
+  const info = h('div', 'cinfo');
+
+  const top = h('div', 'ctop');
+  top.append(h('span', 'cname', name));
+  const copy = h('button', 'mini', 'Copy spawn'); copy.type = 'button';
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText('spawn("' + name + '", 100, 100)'); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy spawn'; }, 1200); } catch (e) {}
+  };
+  top.append(copy);
+  info.append(top, h('div', 'csnip', 'spawn("' + name + '", x, y)'));
+
+  if (isObj) {
+    const sizes = h('div', 'crow');
+    for (const dim of ['w', 'h']) if (has([name, dim]) && typeof def[dim] === 'number') sizes.append(numField(dim === 'w' ? 'Width' : 'Height', [name, dim], def[dim], 1));
+    if (sizes.children.length) info.append(sizes);
+
+    const multi = Array.isArray(def.parts);
+    (multi ? def.parts : [def]).forEach((rp, i) => {
+      if (!rp || typeof rp !== 'object' || Array.isArray(rp)) return;
+      const path = multi ? [name, 'parts', String(i)] : [name];
+      const row = h('div', 'crow');
+      if (multi) row.append(h('span', 'ptag', '#' + (i + 1)));
+      if (has(path.concat('shape')) && typeof rp.shape === 'string') row.append(shapeSelect(path.concat('shape'), rp.shape));
+      for (const [prop, lab] of [['color', 'color'], ['stroke', 'outline']]) {
+        if (has(path.concat(prop)) && typeof rp[prop] === 'string') row.append(colorField(lab, path.concat(prop), rp[prop]));
+      }
+      if (row.children.length) info.append(row);
+    });
+
+    const props = def.props && typeof def.props === 'object' && !Array.isArray(def.props) ? def.props : null;
+    const prow = h('div', 'crow');
+    if (props) for (const k of Object.keys(props)) {
+      const v = props[k], path = [name, 'props', k], f = h('label', 'fld');
+      f.append(k + ' ');
+      if (typeof v === 'number' && has(path)) {
+        const inp = h('input'); inp.type = 'number'; inp.value = String(v); inp.step = 'any';
+        inp.onchange = () => { const n = Number(inp.value); if (inp.value !== '' && isFinite(n)) editValue(path, String(n)); };
+        f.append(inp);
+      } else if (typeof v === 'boolean' && has(path)) {
+        const inp = h('input'); inp.type = 'checkbox'; inp.checked = v;
+        inp.onchange = () => editValue(path, inp.checked ? 'true' : 'false');
+        f.append(inp);
+      } else if (typeof v === 'string' && has(path)) {
+        const inp = h('input'); inp.type = 'text'; inp.value = v;
+        inp.onchange = () => editValue(path, JSON.stringify(inp.value));
+        f.append(inp);
+      } else f.append(JSON.stringify(v));
+      prow.append(f);
+    }
+    const toggle = h('button', 'mini', '+ property'); toggle.type = 'button';
+    prow.append(toggle);
+    info.append(prow);
+
+    const addRow = h('div', 'crow hide');
+    const kin = h('input'); kin.placeholder = 'name, like health'; kin.setAttribute('aria-label', 'Property name');
+    const vin = h('input'); vin.placeholder = 'value, like 3'; vin.setAttribute('aria-label', 'Property value');
+    const go = h('button', 'mini', 'Add'); go.type = 'button';
+    const msg = h('span', 'cwarn');
+    go.onclick = () => {
+      const k = kin.value.trim();
+      if (!/^[A-Za-z_$][\w$]*$/.test(k)) { msg.textContent = 'Use letters, numbers and _ (not starting with a number).'; return; }
+      if (RESERVED.includes(k)) { msg.textContent = '"' + k + '" is already used by the engine. Pick another name.'; return; }
+      if (props && Object.prototype.hasOwnProperty.call(props, k)) { msg.textContent = 'It already has "' + k + '".'; return; }
+      const raw = vin.value.trim();
+      const val = raw === '' ? '0' : (raw === 'true' || raw === 'false') ? raw : isFinite(Number(raw)) ? String(Number(raw)) : JSON.stringify(raw);
+      const ok = props ? addMember([name, 'props'], k, val) : addMember([name], 'props', '{ ' + JSON.stringify(k) + ': ' + val + ' }');
+      msg.textContent = ok ? '' : 'Could not add it. Check the Assets text for a mistake.';
+    };
+    addRow.append(kin, vin, go, msg);
+    toggle.onclick = () => addRow.classList.toggle('hide');
+    info.append(addRow);
+  }
+  for (const w of warnings.slice(0, 3)) info.append(h('div', 'cwarn', '⚠ ' + w));
+  card.append(thumb, info);
+  return card;
+}
+function refreshGallery() {
+  clearTimeout(galleryTimer);
+  const err = $('#gErr'), list = $('#gList');
+  let p;
+  try { p = parseRelaxed(files.assets.doc); }
+  catch (e) { err.textContent = 'Assets: ' + e.message; err.classList.remove('hide'); list.classList.add('stale'); return; }
+  err.classList.add('hide'); list.classList.remove('stale');
+  const names = Object.keys(p.value);
+  $('#gSummary').textContent = 'Assets (' + names.length + ')';
+  list.textContent = '';
+  if (!names.length) list.append(h('div', 'empty', 'No assets yet. Tap "+ New asset" to make one.'));
+  for (const name of names) list.append(buildCard(name, p));
+}
+$('#gNew').onclick = () => {
+  let p;
+  try { p = parseRelaxed(files.assets.doc); }
+  catch (e) { refreshGallery(); return; }
+  let n = 1; while (Object.prototype.hasOwnProperty.call(p.value, 'asset' + n)) n++;
+  const block = '  "asset' + n + '": {\n    "shape": "star",\n    "w": 40,\n    "h": 40,\n    "color": "#ff9de2",\n    "props": { }\n  }';
+  const t = files.assets.doc;
+  if (p.rootEmpty) commitLocal('assets', t.trimEnd() + '\n{\n' + block + '\n}\n');
+  else commitLocal('assets', t.slice(0, p.insertAt) + (p.hasMembers ? ',\n' : '\n') + block + (p.hasMembers ? '' : '\n') + t.slice(p.insertAt));
+  setTimeout(() => { const l = $('#gList'); l.scrollTop = l.scrollHeight; }, 200);
+};
+
 // ---- controls ----
-runBtn.onclick = () => { runProject(null); wsSend({ type: 'run' }); };   // run here now, and tell everyone else to rerun
+runBtn.onclick = () => { rightView = 'preview'; updateRightPanel(); runProject(null); wsSend({ type: 'run' }); };   // run here now, and tell everyone else to rerun
 $('#copy').onclick = async () => { try { await navigator.clipboard.writeText(location.href); $('#copy').textContent = 'Copied'; setTimeout(() => $('#copy').textContent = 'Copy room link', 1500); } catch {} };
 const OPEN = { '(': ')', '{': '}', '[': ']' };
 const CLOSERS = new Set([')', '}', ']']);
