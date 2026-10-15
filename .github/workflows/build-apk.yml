@@ -16,8 +16,7 @@ permissions:
   contents: write
 
 env:
-  APP_URL: https://fxw05vjnra.preview.c35.airoapp.ai/?airoShareToken=Os1hzsSYEex2#ok4f8
-
+  APP_URL: https://airo.ai/share/YjB3c3lyMHluaTpjMzU6SmZxeV8tbTV6MUtu
 jobs:
   apk:
     runs-on: ubuntu-latest
