@@ -343,3 +343,15 @@ process.on('uncaughtException', e => console.error('uncaughtException:', e));
 process.on('unhandledRejection', e => console.error('unhandledRejection:', e));
 
 server.listen(PORT, () => console.log(`CodeSync listening on ${PORT}`));
+import { httpServerHandler } from 'cloudflare:node';
+import express from 'express';
+
+const app = express();
+
+// Your existing routes and middleware...
+app.get('/', (req, res) => {
+  res.send('Hello from Node.js on Cloudflare Workers!');
+});
+
+// THIS LINE FIXES THE ERROR:
+export default httpServerHandler(app);
