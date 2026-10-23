@@ -1,5 +1,5 @@
 // CodeSync — realtime multiplayer web editor (HTML, CSS, JavaScript, Assets).
-// Full original application logic adapted for Cloudflare Workers (Native WebSockets + API + Assets).
+// Cloudflare Workers Module script with 3D starter templates.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -12,7 +12,7 @@ try {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 } catch (e) {}
 
-// ---------------- account store (JSON file / Edge fallback) ----------------
+// ---------------- account store ----------------
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 let users = [];
 try {
@@ -86,7 +86,7 @@ const parseCookies = h => Object.fromEntries((h || '').split(';').filter(Boolean
   const i = p.indexOf('='); return [p.slice(0, i).trim(), decodeURIComponent(p.slice(i + 1).trim())];
 }));
 
-// ---------------- rooms & operational transform ----------------
+// ---------------- rooms & starters (with 3D instructions) ----------------
 const STARTERS = {
   html: `<!DOCTYPE html>
 <html>
@@ -117,18 +117,32 @@ const STARTERS = {
   font-size: 16px;
 }
 `,
-  js: `world.size(480, 320);
+  js: `// Your game! The things in it live in the Assets tab (player, coin, enemy, tree).
+// Want it in 3D? Put use3D() on the first line and spawn with x, y, z (y is up).
+//
+// Handy commands:
+//   spawn("coin", x, y)             put an asset on the screen
+//   onUpdate(dt => { ... })         runs every frame (dt = seconds since the last frame)
+//   onTouch("player", "coin", (a, b) => { ... })    runs when two things touch
+//   hud("text")                     text in the top-left corner
+//   controls({ dpad: { size: 130 }, buttons: ["A", "B"] })    on-screen controls
+//   input.left  input.right  input.up  input.down  input.A  input.B
+//   thing.x  thing.y  thing.w  thing.h  thing.scale  thing.color  thing.destroy()
+//   after(2, fn)   every(2, fn)     timers (seconds)
+//   random(1, 10)   world.width   world.height   world.background
+
+world.size(480, 320);                   // a fixed game screen (delete this line to fill the whole screen)
 world.background = "#14111f";
-controls({ dpad: { size: 130 } });
+controls({ dpad: { size: 130 } });      // on-screen D-pad (arrow keys and WASD work too)
 
 let score = 0;
-let safeTime = 2;
+let safeTime = 2;                      // a moment of safety at the start
 
 spawn("tree", 50, 130);
 spawn("tree", world.width - 50, 210);
 
 const player = spawn("player", world.width / 2, world.height / 2);
-player.opacity = 0.5;
+player.opacity = 0.5;                     // faded = safe for a moment
 
 function dropCoin() {
   spawn("coin", random(30, world.width - 30), random(70, world.height - 170));
@@ -136,6 +150,7 @@ function dropCoin() {
 for (let i = 0; i < 3; i++) dropCoin();
 
 for (let i = 0; i < 2; i++) {
+  // start in the top corners, away from the player
   const enemy = spawn("enemy", i === 0 ? 40 : world.width - 40, random(30, 60));
   enemy.vx = (i === 0 ? 1 : -1) * enemy.speed;
   enemy.vy = enemy.speed * 0.1;
