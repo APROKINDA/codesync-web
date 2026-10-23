@@ -1,7 +1,0 @@
-name = "codesync-web"
-main = "index.js" # Change this to your app's main entry file (e.g., server.js, app.js, or src/index.js)
-compatibility_date = "2026-01-01"
-
-[vars]
-# Add any non-sensitive environment variables here if needed
-# PORT = 8080
