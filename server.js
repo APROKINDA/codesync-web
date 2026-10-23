@@ -1,5 +1,5 @@
 // CodeSync — realtime multiplayer web editor (HTML, CSS, JavaScript). 
-// Pure Cloudflare Workers Module script (Native WebSockets + HTTP).
+// Pure Cloudflare Workers Module script (Native WebSockets + API + Cloudflare Static Assets).
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -225,28 +225,7 @@ export default {
       return new Response(JSON.stringify(pub(resData.user)), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // 3. Static Files Handler
-    let filePath = path.join(process.cwd(), 'public', url.pathname === '/' ? 'index.html' : url.pathname);
-    try {
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const ext = path.extname(filePath);
-        const mimeTypes = { '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
-        return new Response(fs.readFileSync(filePath), {
-          headers: { 'Content-Type': mimeTypes[ext] || 'text/plain' }
-        });
-      }
-    } catch (e) {}
-
-    // Fallback to index.html for frontend routing
-    try {
-      const indexPath = path.join(process.cwd(), 'public', 'index.html');
-      if (fs.existsSync(indexPath)) {
-        return new Response(fs.readFileSync(indexPath), {
-          headers: { 'Content-Type': 'text/html' }
-        });
-      }
-    } catch (e) {}
-
-    return new Response('Not Found', { status: 404 });
+    // 3. Fallback to Cloudflare's static asset handler
+    return env.ASSETS.fetch(request);
   }
 };
