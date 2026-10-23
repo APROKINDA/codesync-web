@@ -1,5 +1,4 @@
-// CodeSync — realtime multiplayer web editor (HTML, CSS, JavaScript). Plain Node.js (Express), no build step.
-import express from 'express';
+// CodeSync — realtime multiplayer web editor (HTML, CSS, JavaScript). Pure Node.js, no Express/build step.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -12,12 +11,9 @@ const DATA_DIR = process.env.DATA_DIR || 'data';
 const INVITE_CODE = process.env.INVITE_CODE || '';
 const SECRET = process.env.SECRET || 'dev-secret-change-me';
 
-// Wrap fs operations in try/catch for Cloudflare Workers read-only environment
 try {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-} catch (e) {
-  // Ignored on serverless edge
-}
+} catch (e) {}
 
 // ---------------- account store ----------------
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
@@ -30,9 +26,7 @@ try {
 const saveUsers = () => {
   try {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users));
-  } catch (e) {
-    // Read-only filesystem on Cloudflare Workers
-  }
+  } catch (e) {}
 };
 const NAME_RX = /^[A-Za-z0-9_. -]{2,20}$/;
 const COLOR_RX = /^#[0-9a-fA-F]{6}$/;
@@ -88,57 +82,6 @@ const parseCookies = h => Object.fromEntries((h || '').split(';').filter(Boolean
   const i = p.indexOf('='); return [p.slice(0, i).trim(), decodeURIComponent(p.slice(i + 1).trim())];
 }));
 
-// ---------------- http app ----------------
-const app = express();
-
-// Custom lightweight JSON body parser (avoids express.json() / iconv-lite worker errors)
-app.use((req, res, next) => {
-  if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
-    req.on('end', () => {
-      try {
-        req.body = data ? JSON.parse(data) : {};
-      } catch (e) {
-        req.body = {};
-      }
-      next();
-    });
-  } else {
-    req.body = {};
-    next();
-  }
-});
-
-app.use(express.static(path.join(process.cwd(), 'public')));
-
-function setCookie(res, req, u) {
-  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  res.setHeader('Set-Cookie', `cs=${token(u)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${secure ? '; Secure' : ''}`);
-}
-const me = req => fromToken(parseCookies(req.headers.cookie).cs);
-
-app.post('/api/signup', (req, res) => {
-  const r = createUser(req.body.name, req.body.password, req.body.invite);
-  if (r.error) return res.status(400).json({ error: r.error });
-  setCookie(res, req, r.user);
-  res.json(pub(r.user));
-});
-app.post('/api/login', async (req, res) => {
-  const u = login(req.body.name, req.body.password);
-  if (!u) { await new Promise(r => setTimeout(r, 500)); return res.status(401).json({ error: 'Wrong name or password' }); }
-  setCookie(res, req, u);
-  res.json(pub(u));
-});
-app.post('/api/logout', (_req, res) => { res.setHeader('Set-Cookie', 'cs=; Path=/; Max-Age=0'); res.json({ ok: true }); });
-app.get('/api/me', (req, res) => { const u = me(req); u ? res.json(pub(u)) : res.sendStatus(401); });
-app.post('/api/profile', (req, res) => {
-  const u = me(req); if (!u) return res.sendStatus(401);
-  const r = updateUser(u, req.body.name, req.body.color);
-  if (r.error) return res.status(400).json({ error: r.error });
-  res.json(pub(r.user));
-});
-
 // ---------------- rooms setup ----------------
 const STARTERS = {
   html: `<!DOCTYPE html>\n<html>\n<head><meta name="viewport" content="width=device-width, initial-scale=1"></head>\n<body><button id="restart">Restart</button></body>\n</html>`,
@@ -163,14 +106,146 @@ const broadcast = (r, s, except) => { for (const c of r.clients) if (c !== excep
 const initMsg = (r, lang) => JSON.stringify({ type: 'init', lang, v: r.docs[lang].v, doc: r.docs[lang].text });
 const usersMsg = r => JSON.stringify({ type: 'users', list: [...r.clients].map(c => ({ id: c.id, name: c.user.name, color: c.user.color })) });
 
-// ---------------- server & export ----------------
-const server = http.createServer(app);
+// ---------------- HTTP Server & API Router ----------------
+const server = http.createServer(async (req, res) => {
+  const parseBody = () => new Promise(resolve => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); }
+    });
+  });
 
-process.on('uncaughtException', e => console.error('uncaughtException:', e));
-process.on('unhandledRejection', e => console.error('unhandledRejection:', e));
+  const sendJSON = (status, obj) => {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(obj));
+  };
+
+  const cookies = parseCookies(req.headers.cookie);
+  const currentUser = () => fromToken(cookies.cs);
+  const setCookieHeader = (u) => {
+    const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    res.setHeader('Set-Cookie', `cs=${token(u)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${secure ? '; Secure' : ''}`);
+  };
+
+  // API Routes
+  if (req.method === 'POST' && req.url === '/api/signup') {
+    const body = await parseBody();
+    const r = createUser(body.name, body.password, body.invite);
+    if (r.error) return sendJSON(400, { error: r.error });
+    setCookieHeader(r.user);
+    return sendJSON(200, pub(r.user));
+  }
+  if (req.method === 'POST' && req.url === '/api/login') {
+    const body = await parseBody();
+    const u = login(body.name, body.password);
+    if (!u) {
+      await new Promise(r => setTimeout(r, 500));
+      return sendJSON(401, { error: 'Wrong name or password' });
+    }
+    setCookieHeader(u);
+    return sendJSON(200, pub(u));
+  }
+  if (req.method === 'POST' && req.url === '/api/logout') {
+    res.setHeader('Set-Cookie', 'cs=; Path=/; Max-Age=0');
+    return sendJSON(200, { ok: true });
+  }
+  if (req.method === 'GET' && req.url === '/api/me') {
+    const u = currentUser();
+    return u ? sendJSON(200, pub(u)) : res.statusCode = 401, res.end();
+  }
+  if (req.method === 'POST' && req.url === '/api/profile') {
+    const u = currentUser();
+    if (!u) return res.statusCode = 401, res.end();
+    const body = await parseBody();
+    const r = updateUser(u, body.name, body.color);
+    if (r.error) return sendJSON(400, { error: r.error });
+    return sendJSON(200, pub(r.user));
+  }
+
+  // Static files handler for public folder
+  let filePath = path.join(process.cwd(), 'public', req.url === '/' ? 'index.html' : req.url);
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath);
+      const mimeTypes = { '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
+      res.setHeader('Content-Type', mimeTypes[ext] || 'text/plain');
+      res.end(fs.readFileSync(filePath));
+      return;
+    }
+  } catch (e) {}
+
+  // Fallback to index.html for SPA routing if needed
+  try {
+    const indexPath = path.join(process.cwd(), 'public', 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.setHeader('Content-Type', 'text/html');
+      res.end(fs.readFileSync(indexPath));
+      return;
+    }
+  } catch (e) {}
+
+  res.statusCode = 404;
+  res.end('Not Found');
+});
+
+// ---------------- WebSocket setup ----------------
+const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
+server.on('upgrade', (req, socket, head) => {
+  if (!req.url.startsWith('/ws')) return socket.destroy();
+  const user = fromToken(parseCookies(req.headers.cookie).cs);
+  if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req, user));
+});
+
+wss.on('connection', (ws, req, user) => {
+  const url = new URL(req.url, 'http://x');
+  const roomName = (url.searchParams.get('room') || 'lobby').slice(0, 40) || 'lobby';
+  const r = room(roomName);
+  const client = { id: crypto.randomUUID().slice(0, 6), user, ws };
+  r.clients.add(client);
+  send(client, JSON.stringify({ type: 'id', id: client.id }));
+  for (const l of LANGS) send(client, initMsg(r, l));
+  broadcast(r, usersMsg(r));
+
+  ws.on('error', () => {});
+  ws.on('message', raw => {
+    try {
+      let m; try { m = JSON.parse(raw); } catch { return; }
+      if (m.type === 'op') {
+        if (!LANGS.includes(m.lang)) return;
+        const d = r.docs[m.lang];
+        if (m.base !== d.v) { send(client, initMsg(r, m.lang)); return; }
+        let text = d.text;
+        for (const o of m.ops) {
+          if (o.t === 'i') text = text.slice(0, o.p) + o.s + text.slice(o.p);
+          else if (o.t === 'd') text = text.slice(0, o.p) + text.slice(o.p + o.n);
+        }
+        d.text = text; d.v++;
+        broadcast(r, JSON.stringify({ type: 'op', lang: m.lang, v: d.v, id: client.id, ops: m.ops }));
+      } else if (m.type === 'cur' && LANGS.includes(m.lang)) {
+        broadcast(r, JSON.stringify({ type: 'cur', lang: m.lang, id: client.id, s: m.s, e: m.e }), client);
+      } else if (m.type === 'profile') {
+        broadcast(r, usersMsg(r));
+      } else if (m.type === 'ping') {
+        send(client, JSON.stringify({ type: 'pong', t: m.t }));
+      } else if (m.type === 'run') {
+        const now = Date.now();
+        if (now - r.lastRun < 400) return;
+        r.lastRun = now;
+        broadcast(r, JSON.stringify({ type: 'run', by: client.user.name }), client);
+      }
+    } catch (e) {}
+  });
+  ws.on('close', () => { r.clients.delete(client); broadcast(r, usersMsg(r)); });
+});
+
+process.on('uncaughtException', e => {});
+process.on('unhandledRejection', e => {});
 
 if (process.env.NODE_ENV !== 'production') {
   server.listen(PORT, () => console.log(`CodeSync listening on ${PORT}`));
 }
 
-export default httpServerHandler(app);
+export default httpServerHandler(server);
