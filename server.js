@@ -90,7 +90,26 @@ const parseCookies = h => Object.fromEntries((h || '').split(';').filter(Boolean
 
 // ---------------- http app ----------------
 const app = express();
-app.use(express.json());
+
+// Custom lightweight JSON body parser (avoids express.json() / iconv-lite worker errors)
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      try {
+        req.body = data ? JSON.parse(data) : {};
+      } catch (e) {
+        req.body = {};
+      }
+      next();
+    });
+  } else {
+    req.body = {};
+    next();
+  }
+});
+
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 function setCookie(res, req, u) {
@@ -150,10 +169,8 @@ const server = http.createServer(app);
 process.on('uncaughtException', e => console.error('uncaughtException:', e));
 process.on('unhandledRejection', e => console.error('unhandledRejection:', e));
 
-// Bind listener for local dev fallback
 if (process.env.NODE_ENV !== 'production') {
   server.listen(PORT, () => console.log(`CodeSync listening on ${PORT}`));
 }
 
-// Mandatory Cloudflare Workers ES Module export handler
 export default httpServerHandler(app);
