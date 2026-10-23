@@ -1,0 +1,7 @@
+name = "codesync-web"
+main = "server.js"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Add non-sensitive environment variables here if needed
