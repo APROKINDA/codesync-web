@@ -1,30 +1,8 @@
-// CodeSync — realtime multiplayer web editor (HTML, CSS, JavaScript, Assets).
-// Cloudflare Workers Module script with 3D starter templates.
+// CodeSync — realtime multiplayer web editor with Cloudflare KV user persistence.
 
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 
-const DATA_DIR = 'data';
 const SECRET = process.env.SECRET || 'dev-secret-change-me';
-
-try {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-} catch (e) {}
-
-// ---------------- account store ----------------
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-let users = [];
-try {
-  users = fs.existsSync(USERS_FILE) ? JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')) : [];
-} catch (e) {
-  users = [];
-}
-const saveUsers = () => {
-  try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users));
-  } catch (e) {}
-};
 
 const NAME_RX = /^[A-Za-z0-9_. -]{2,20}$/;
 const COLOR_RX = /^#[0-9a-fA-F]{6}$/;
@@ -34,37 +12,64 @@ const hash = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString('hex');
 const sign = s => crypto.createHmac('sha256', SECRET).update(s).digest('hex');
 const pub = u => ({ name: u.name, color: u.color });
 
-function checkName(name, self) {
+// ---------------- Cloudflare KV Account Store ----------------
+async function getUsers(env) {
+  if (!env || !env.USERS_KV) return [];
+  try {
+    const val = await env.USERS_KV.get('users_list');
+    return val ? JSON.parse(val) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveUsers(env, users) {
+  if (!env || !env.USERS_KV) return;
+  try {
+    await env.USERS_KV.put('users_list', JSON.stringify(users));
+  } catch {}
+}
+
+async function checkName(env, name, self) {
+  const users = await getUsers(env);
   if (!NAME_RX.test(name)) return 'Name must be 2-20 characters: letters, numbers, spaces, . _ -';
   if (users.some(u => u !== self && u.name.toLowerCase() === name.toLowerCase())) return 'That name is taken';
   return null;
 }
 
-function createUser(name, pw, invite, inviteEnv) {
+async function createUser(env, name, pw) {
   name = (name || '').trim();
-  if (inviteEnv && invite !== inviteEnv) return { error: 'Invalid invite code' };
-  const err = checkName(name, null);
+  const err = await checkName(env, name, null);
   if (err) return { error: err };
   if (!pw || pw.length < 6) return { error: 'Password must be at least 6 characters' };
   const salt = crypto.randomBytes(16).toString('hex');
   const u = { id: crypto.randomUUID(), name, salt, hash: hash(pw, salt), color: PALETTE[Math.floor(Math.random() * PALETTE.length)] };
-  users.push(u); saveUsers();
+  const users = await getUsers(env);
+  users.push(u);
+  await saveUsers(env, users);
   return { user: u };
 }
 
-function login(name, pw) {
+async function login(env, name, pw) {
+  const users = await getUsers(env);
   const u = users.find(x => x.name.toLowerCase() === (name || '').trim().toLowerCase());
   if (!u) return null;
   const a = Buffer.from(hash(pw || '', u.salt)), b = Buffer.from(u.hash);
   return a.length === b.length && crypto.timingSafeEqual(a, b) ? u : null;
 }
 
-function updateUser(u, name, color) {
+async function updateUser(env, u, name, color) {
   name = (name || '').trim();
-  const err = checkName(name, u);
+  const err = await checkName(env, name, u);
   if (err) return { error: err };
   if (!COLOR_RX.test(color || '')) return { error: 'Pick a valid color' };
-  u.name = name; u.color = color; saveUsers();
+  u.name = name; u.color = color;
+  const users = await getUsers(env);
+  const idx = users.findIndex(x => x.id === u.id);
+  if (idx >= 0) {
+    users[idx] = u;
+    await saveUsers(env, users);
+  }
   return { user: u };
 }
 
@@ -73,12 +78,13 @@ function token(u) {
   return `${p}.${sign(p)}`;
 }
 
-function fromToken(t) {
+async function fromToken(env, t) {
   if (!t) return null;
   const [id, exp, sig] = t.split('.');
   if (!id || !exp || !sig || Number(exp) < Date.now()) return null;
   const expect = sign(`${id}.${exp}`);
   if (expect.length !== sig.length || !crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig))) return null;
+  const users = await getUsers(env);
   return users.find(u => u.id === id) || null;
 }
 
@@ -86,141 +92,12 @@ const parseCookies = h => Object.fromEntries((h || '').split(';').filter(Boolean
   const i = p.indexOf('='); return [p.slice(0, i).trim(), decodeURIComponent(p.slice(i + 1).trim())];
 }));
 
-// ---------------- rooms & starters (with 3D instructions) ----------------
+// ---------------- Rooms & Starters ----------------
 const STARTERS = {
-  html: `<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-</head>
-<body>
-  <button id="restart">Restart</button>
-</body>
-</html>
-`,
-  css: `body {
-  margin: 0;
-  overflow: hidden;
-  background: #14111f;
-  font-family: sans-serif;
-}
-
-#restart {
-  position: fixed;
-  top: 10px;
-  right: 10px;
-  padding: 8px 14px;
-  border: 0;
-  border-radius: 8px;
-  background: #b48cff;
-  color: #1a1030;
-  font-size: 16px;
-}
-`,
-  js: `// Your game! The things in it live in the Assets tab (player, coin, enemy, tree).
-// Want it in 3D? Put use3D() on the first line and spawn with x, y, z (y is up).
-//
-// Handy commands:
-//   spawn("coin", x, y)             put an asset on the screen
-//   onUpdate(dt => { ... })         runs every frame (dt = seconds since the last frame)
-//   onTouch("player", "coin", (a, b) => { ... })    runs when two things touch
-//   hud("text")                     text in the top-left corner
-//   controls({ dpad: { size: 130 }, buttons: ["A", "B"] })    on-screen controls
-//   input.left  input.right  input.up  input.down  input.A  input.B
-//   thing.x  thing.y  thing.w  thing.h  thing.scale  thing.color  thing.destroy()
-//   after(2, fn)   every(2, fn)     timers (seconds)
-//   random(1, 10)   world.width   world.height   world.background
-
-world.size(480, 320);                   // a fixed game screen (delete this line to fill the whole screen)
-world.background = "#14111f";
-controls({ dpad: { size: 130 } });      // on-screen D-pad (arrow keys and WASD work too)
-
-let score = 0;
-let safeTime = 2;                      // a moment of safety at the start
-
-spawn("tree", 50, 130);
-spawn("tree", world.width - 50, 210);
-
-const player = spawn("player", world.width / 2, world.height / 2);
-player.opacity = 0.5;                     // faded = safe for a moment
-
-function dropCoin() {
-  spawn("coin", random(30, world.width - 30), random(70, world.height - 170));
-}
-for (let i = 0; i < 3; i++) dropCoin();
-
-for (let i = 0; i < 2; i++) {
-  // start in the top corners, away from the player
-  const enemy = spawn("enemy", i === 0 ? 40 : world.width - 40, random(30, 60));
-  enemy.vx = (i === 0 ? 1 : -1) * enemy.speed;
-  enemy.vy = enemy.speed * 0.1;
-}
-
-onTouch("player", "coin", (p, coin) => {
-  score += coin.value;
-  coin.destroy();
-  dropCoin();
-});
-
-onTouch("player", "enemy", () => {
-  if (safeTime > 0) return;
-  player.health -= 1;
-  safeTime = 1;
-  player.opacity = 0.5;
-  if (player.health <= 0) restart();
-});
-
-onUpdate(dt => {
-  if (safeTime > 0) {
-    safeTime -= dt;
-    if (safeTime <= 0) player.opacity = 1;
-  }
-  hud("Score: " + score + "    Health: " + player.health);
-});
-
-function restart() {
-  score = 0;
-  safeTime = 2;
-  player.health = 3;
-  player.opacity = 0.5;
-  player.x = world.width / 2;
-  player.y = world.height / 2;
-}
-document.getElementById("restart").addEventListener("click", restart);
-`,
-  assets: `{
-  "player": {
-    "w": 40, "h": 40,
-    "control": "move",
-    "parts": [
-      { "shape": "rect", "w": 40, "h": 40, "radius": 10, "color": "#7fe0b0" },
-      { "shape": "circle", "x": -9, "y": -5, "w": 11, "h": 11, "color": "white" },
-      { "shape": "circle", "x": 9, "y": -5, "w": 11, "h": 11, "color": "white" },
-      { "shape": "circle", "x": -9, "y": -4, "w": 5, "h": 5, "color": "#14111f" },
-      { "shape": "circle", "x": 9, "y": -4, "w": 5, "h": 5, "color": "#14111f" }
-    ],
-    "props": { "speed": 220, "health": 3 }
-  },
-  "coin": {
-    "shape": "circle", "w": 20, "h": 20,
-    "color": "gold", "stroke": "#b8860b", "lineWidth": 2,
-    "props": { "value": 1 }
-  },
-  "enemy": {
-    "shape": "triangle", "w": 34, "h": 34,
-    "color": "#ff6b81",
-    "edges": "bounce",
-    "props": { "speed": 90 }
-  },
-  "tree": {
-    "w": 40, "h": 60,
-    "parts": [
-      { "shape": "rect", "x": 0, "y": 18, "w": 10, "h": 26, "color": "#8b5a2b" },
-      { "shape": "circle", "x": 0, "y": -8, "w": 40, "h": 40, "color": "#2e8b57" }
-    ]
-  }
-}
-`,
+  html: `<!DOCTYPE html>\n<html>\n<head>\n<meta name="viewport" content="width=device-width, initial-scale=1">\n</head>\n<body>\n  <button id="restart">Restart</button>\n</body>\n</html>\n`,
+  css: `body {\n  margin: 0;\n  overflow: hidden;\n  background: #14111f;\n  font-family: sans-serif;\n}\n\n#restart {\n  position: fixed;\n  top: 10px;\n  right: 10px;\n  padding: 8px 14px;\n  border: 0;\n  border-radius: 8px;\n  background: #b48cff;\n  color: #1a1030;\n  font-size: 16px;\n}\n`,
+  js: `world.size(480, 320);\nworld.background = "#14111f";\ncontrols({ dpad: { size: 130 } });\n\nlet score = 0;\nlet safeTime = 2;\n\nspawn("tree", 50, 130);\nspawn("tree", world.width - 50, 210);\n\nconst player = spawn("player", world.width / 2, world.height / 2);\nplayer.opacity = 0.5;\n\nfunction dropCoin() {\n  spawn("coin", random(30, world.width - 30), random(70, world.height - 170));\n}\nfor (let i = 0; i < 3; i++) dropCoin();\n\nfor (let i = 0; i < 2; i++) {\n  const enemy = spawn("enemy", i === 0 ? 40 : world.width - 40, random(30, 60));\n  enemy.vx = (i === 0 ? 1 : -1) * enemy.speed;\n  enemy.vy = enemy.speed * 0.1;\n}\n\nonTouch("player", "coin", (p, coin) => {\n  score += coin.value;\n  coin.destroy();\n  dropCoin();\n});\n\nonTouch("player", "enemy", () => {\n  if (safeTime > 0) return;\n  player.health -= 1;\n  safeTime = 1;\n  player.opacity = 0.5;\n  if (player.health <= 0) restart();\n});\n\nonUpdate(dt => {\n  if (safeTime > 0) {\n    safeTime -= dt;\n    if (safeTime <= 0) player.opacity = 1;\n  }\n  hud("Score: " + score + "    Health: " + player.health);\n});\n\nfunction restart() {\n  score = 0;\n  safeTime = 2;\n  player.health = 3;\n  player.opacity = 0.5;\n  player.x = world.width / 2;\n  player.y = world.height / 2;\n}\ndocument.getElementById("restart").addEventListener("click", restart);\n`,
+  assets: `{\n  "player": {\n    "w": 40, "h": 40,\n    "control": "move",\n    "parts": [\n      { "shape": "rect", "w": 40, "h": 40, "radius": 10, "color": "#7fe0b0" },\n      { "shape": "circle", "x": -9, "y": -5, "w": 11, "h": 11, "color": "white" },\n      { "shape": "circle", "x": 9, "y": -5, "w": 11, "h": 11, "color": "white" },\n      { "shape": "circle", "x": -9, "y": -4, "w": 5, "h": 5, "color": "#14111f" },\n      { "shape": "circle", "x": 9, "y": -4, "w": 5, "h": 5, "color": "#14111f" }\n    ],\n    "props": { "speed": 220, "health": 3 }\n  },\n  "coin": {\n    "shape": "circle", "w": 20, "h": 20,\n    "color": "gold", "stroke": "#b8860b", "lineWidth": 2,\n    "props": { "value": 1 }\n  },\n  "enemy": {\n    "shape": "triangle", "w": 34, "h": 34,\n    "color": "#ff6b81",\n    "edges": "bounce",\n    "props": { "speed": 90 }\n  },\n  "tree": {\n    "w": 40, "h": 60,\n    "parts": [\n      { "shape": "rect", "x": 0, "y": 18, "w": 10, "h": 26, "color": "#8b5a2b" },\n      { "shape": "circle", "x": 0, "y": -8, "w": 40, "h": 40, "color": "#2e8b57" }\n    ]\n  }\n}\n`,
 };
 
 const LANGS = Object.keys(STARTERS);
@@ -274,12 +151,11 @@ function opOnRoom(r, ws, clientId, lang, base, ops) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const inviteEnv = env.INVITE_CODE || '';
 
     // 1. WebSocket Upgrade Handler
     if (url.pathname.startsWith('/ws')) {
       const cookies = parseCookies(request.headers.get('cookie') || '');
-      const user = fromToken(cookies.cs);
+      const user = await fromToken(env, cookies.cs);
       if (!user) return new Response('Unauthorized', { status: 401 });
 
       if (request.headers.get('Upgrade') !== 'websocket') {
@@ -339,11 +215,11 @@ export default {
       headers.append('Set-Cookie', `cs=${token(u)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${secure ? '; Secure' : ''}`);
     };
     const cookies = parseCookies(request.headers.get('cookie') || '');
-    const currentUser = fromToken(cookies.cs);
+    const currentUser = await fromToken(env, cookies.cs);
 
     if (request.method === 'POST' && url.pathname === '/api/signup') {
       const body = await getBody();
-      const resData = createUser(body.name, body.password, body.invite, inviteEnv);
+      const resData = await createUser(env, body.name, body.password);
       if (resData.error) return new Response(JSON.stringify({ error: resData.error }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       const headers = new Headers({ 'Content-Type': 'application/json' });
       setCookieHeader(headers, resData.user);
@@ -351,7 +227,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/login') {
       const body = await getBody();
-      const u = login(body.name, body.password);
+      const u = await login(env, body.name, body.password);
       if (!u) {
         await new Promise(r => setTimeout(r, 500));
         return new Response(JSON.stringify({ error: 'Wrong name or password' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
@@ -370,7 +246,7 @@ export default {
     if (request.method === 'POST' && url.pathname === '/api/profile') {
       if (!currentUser) return new Response(null, { status: 401 });
       const body = await getBody();
-      const resData = updateUser(currentUser, body.name, body.color);
+      const resData = await updateUser(env, currentUser, body.name, body.color);
       if (resData.error) return new Response(JSON.stringify({ error: resData.error }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       return new Response(JSON.stringify(pub(resData.user)), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
