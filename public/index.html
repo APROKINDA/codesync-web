@@ -68,38 +68,34 @@ textarea{padding:22px 16px 14px}
 .caret i{position:absolute;bottom:100%;left:0;font:600 11px/16px system-ui,sans-serif;padding:0 5px;border-radius:3px 3px 3px 0;white-space:nowrap}
 .hide{display:none!important}
 #auth{flex:1;display:grid;place-items:center;padding:20px}
-#auth form{width:min(360px,100%);display:flex;flex-direction:column;gap:12px}
-#auth h2{margin:0 0 2px;font-size:22px}
-.field-group{display:flex;flex-direction:column;gap:4px}
-.field-group label{font-size:12px;color:var(--mute)}
+#auth form{width:min(340px,100%);display:flex;flex-direction:column;gap:10px}
+#auth h2{margin:0 0 4px;font-size:22px}
 input{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
 input[type=color]{padding:2px;height:34px;width:56px}
 .err{color:var(--bad);font-size:13px;min-height:18px}
 .link{background:none;border:0;color:var(--acc);padding:0;text-align:left}
 #me{display:flex;align-items:center;gap:8px}
 .sw{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none}
-#prof, #roomModal{position:absolute;right:16px;top:52px;z-index:10;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;width:min(320px,calc(100% - 32px));display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
-#prof label, #roomModal label{font-size:13px;color:var(--mute);display:flex;flex-direction:column;gap:4px}
+#prof{position:absolute;right:16px;top:52px;z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;width:min(280px,calc(100% - 32px));display:flex;flex-direction:column;gap:10px}
+#prof label{font-size:13px;color:var(--mute);display:flex;flex-direction:column;gap:4px}
 #people{display:flex;gap:10px;flex-wrap:wrap}
-.divider{height:1px;background:var(--line);margin:4px 0}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button.danger:hover{background:var(--bad);color:#2a0f16}
+button.run.danger{background:var(--bad);color:#2a0f16;border-color:var(--bad)}
+#resetModal{position:fixed;inset:0;z-index:40;background:rgba(10,8,20,.65);display:flex;align-items:center;justify-content:center;padding:20px}
+#resetModal .box{background:var(--panel);border:1px solid var(--bad);border-radius:10px;padding:18px;width:min(360px,100%);display:flex;flex-direction:column;gap:12px}
+#resetModal h2{margin:0;font-size:17px;color:var(--bad)}
+#resetModal p{margin:0;font-size:14px;color:var(--mute)}
+#resetModal .row{display:flex;justify-content:flex-end;gap:10px}
 </style>
 </head>
 <body>
 <div id="auth" class="hide">
   <form id="af">
     <h2 id="at">Sign in to CodeSync</h2>
-    <div class="field-group">
-      <label for="an">Account Name</label>
-      <input id="an" placeholder="Account name" autocomplete="username" maxlength="20" required aria-label="Account name">
-    </div>
-    <div class="field-group">
-      <label for="ap">Password</label>
-      <input id="ap" type="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
-    </div>
-    <div class="field-group">
-      <label for="ar">Room Invite Code (Optional)</label>
-      <input id="ar" placeholder="e.g. lobby or friend-room" aria-label="Room invite code">
-    </div>
+    <input id="an" placeholder="Account name" autocomplete="username" maxlength="20" required aria-label="Account name">
+    <input id="ap" type="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
+    <input id="ai" placeholder="Invite code (if you were given one)" class="hide" aria-label="Invite code">
     <div class="err" id="ae" role="alert"></div>
     <button class="run" id="ab">Sign in</button>
     <button type="button" class="link" id="as">New here? Create an account</button>
@@ -108,27 +104,13 @@ input[type=color]{padding:2px;height:34px;width:56px}
 <header id="top" class="hide">
   <h1>CodeSync</h1>
   <span class="pill"><span class="dot"></span><span id="st">connecting</span></span>
-  <span class="pill">Room: <b id="rn">lobby</b></span>
-  <button id="roomBtn">Rooms ▾</button>
   <span class="pill">Round trip <b id="rtt">–</b></span>
   <span id="people" class="pill"></span>
+  <button id="resetBtn" class="danger" disabled>Reset</button>
   <button id="copy">Copy room link</button>
   <button id="me" aria-haspopup="true"><span class="sw" id="msw"></span><span id="mn"></span></button>
   <button id="run" class="run" disabled>Run</button>
 </header>
-
-<div id="roomModal" class="hide">
-  <div style="font-weight:600;font-size:15px">Room Menu</div>
-  <label>Join Existing Room
-    <div style="display:flex;gap:6px;margin-top:2px">
-      <input id="rmInput" placeholder="Enter room code">
-      <button id="rmJoin" class="run">Join</button>
-    </div>
-  </label>
-  <div class="divider"></div>
-  <button id="rmCreate" type="button" style="width:100%">+ Create New Room</button>
-</div>
-
 <div id="prof" class="hide">
   <label>Name shown on your cursor<input id="pn" maxlength="20"></label>
   <label>Cursor color<input id="pc" type="color"></label>
@@ -136,7 +118,16 @@ input[type=color]{padding:2px;height:34px;width:56px}
   <button id="ps" class="run">Save</button>
   <button id="lo" class="link">Sign out</button>
 </div>
-
+<div id="resetModal" class="hide" role="dialog" aria-modal="true" aria-labelledby="rmTitle" aria-describedby="rmBody">
+  <div class="box">
+    <h2 id="rmTitle"></h2>
+    <p id="rmBody"></p>
+    <div class="row">
+      <button id="rmCancel" class="link">Cancel</button>
+      <button id="rmNext" class="run danger"></button>
+    </div>
+  </div>
+</div>
 <main id="app" class="hide">
   <section>
     <div class="tabs" id="tabs" role="tablist" aria-label="Files"></div>
@@ -159,23 +150,15 @@ input[type=color]{padding:2px;height:34px;width:56px}
 <script>
 const $ = q => document.querySelector(q);
 const ed = $('#ed'), runBtn = $('#run');
-
-let room = location.hash.slice(1) || 'lobby';
-$('#ar').value = room !== 'lobby' ? room : '';
-
-function updateRoomHash(newRoom) {
-  room = newRoom || 'lobby';
-  location.hash = room;
-  $('#rn').textContent = room;
-}
-updateRoomHash(room);
-
+const room = location.hash.slice(1) || Math.random().toString(36).slice(2, 7);
+location.hash = room;
 const api = async (path, body) => {
   const r = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   return { ok: r.ok, data: await r.json().catch(() => ({})) };
 };
 const ink = hex => (parseInt(hex.slice(1, 3), 16) * 299 + parseInt(hex.slice(3, 5), 16) * 587 + parseInt(hex.slice(5, 7), 16) * 114) / 1000 > 140 ? '#14111f' : '#fff';
 
+// ---- the four files in every room ----
 const TABS = [
   { k: 'html', label: 'HTML', file: 'index.html' },
   { k: 'css', label: 'CSS', file: 'style.css' },
@@ -184,23 +167,24 @@ const TABS = [
 ];
 const langLabel = k => (TABS.find(t => t.k === k) || {}).label || k;
 const SHAPE_LIST = ['rect', 'circle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'heart', 'line', 'text', 'box', 'sphere', 'cylinder', 'cone'];
+// names an object already uses itself, so they can't be used for your own properties
 const RESERVED = ['x', 'y', 'w', 'h', 'd', 'baseD', 'vz', 'tilt', 'roll', 'onGround', 'move', 'scale', 'angle', 'opacity', 'visible', 'z', 'vx', 'vy', 'gravity', 'control', 'edges', 'alive', 'parts', 'id', 'name', 'tags', 'r', 'color', 'text', 'baseW', 'baseH', 'destroy', 'setSize', 'grow', 'moveTo', 'distanceTo', 'touching', 'stayInWorld'];
 
+// ---- sign in / sign up ----
 let signup = false, me = null;
 function authMode(on) {
   signup = on;
   $('#at').textContent = on ? 'Create your account' : 'Sign in to CodeSync';
   $('#ab').textContent = on ? 'Create account' : 'Sign in';
   $('#as').textContent = on ? 'Already have an account? Sign in' : 'New here? Create an account';
+  $('#ai').classList.toggle('hide', !on);
   $('#ap').autocomplete = on ? 'new-password' : 'current-password';
   $('#ae').textContent = '';
 }
 $('#as').onclick = () => authMode(!signup);
 $('#af').onsubmit = async e => {
   e.preventDefault();
-  const roomInvite = $('#ar').value.trim();
-  if (roomInvite) updateRoomHash(roomInvite);
-  const r = await api(signup ? '/api/signup' : '/api/login', { name: $('#an').value, password: $('#ap').value });
+  const r = await api(signup ? '/api/signup' : '/api/login', { name: $('#an').value, password: $('#ap').value, invite: $('#ai').value });
   if (r.ok) start(r.data); else $('#ae').textContent = r.data.error || 'Something went wrong';
 };
 function showMe() { $('#mn').textContent = me.name; $('#msw').style.background = me.color; }
@@ -212,29 +196,8 @@ function start(u) {
 }
 (async () => { const r = await api('/api/me'); if (r.ok) start(r.data); else $('#auth').classList.remove('hide'); })();
 
-// ---- Rooms Menu ----
-$('#roomBtn').onclick = () => { $('#prof').classList.add('hide'); $('#roomModal').classList.toggle('hide'); };
-$('#rmJoin').onclick = () => {
-  const target = $('#rmInput').value.trim();
-  if (target) {
-    updateRoomHash(target);
-    $('#roomModal').classList.add('hide');
-    reconnectRoom();
-  }
-};
-$('#rmCreate').onclick = () => {
-  const newCode = Math.random().toString(36).slice(2, 7);
-  updateRoomHash(newCode);
-  $('#roomModal').classList.add('hide');
-  reconnectRoom();
-};
-
-function reconnectRoom() {
-  if (ws) ws.close();
-}
-
 // ---- profile ----
-$('#me').onclick = () => { $('#roomModal').classList.add('hide'); $('#pn').value = me.name; $('#pc').value = me.color; $('#pe').textContent = ''; $('#prof').classList.toggle('hide'); };
+$('#me').onclick = () => { $('#pn').value = me.name; $('#pc').value = me.color; $('#pe').textContent = ''; $('#prof').classList.toggle('hide'); };
 $('#ps').onclick = async () => {
   const r = await api('/api/profile', { name: $('#pn').value, color: $('#pc').value });
   if (!r.ok) return $('#pe').textContent = r.data.error || 'Could not save';
@@ -243,7 +206,31 @@ $('#ps').onclick = async () => {
 };
 $('#lo').onclick = async () => { await api('/api/logout', {}); location.reload(); };
 
-// ---- operational transform ----
+// ---- reset: wipes this room's HTML/CSS/JS/Assets back to the starter template,
+// for every tab and everyone connected. Gated behind three escalating confirmations
+// since it can't be undone and affects the whole room, not just the person tapping it.
+const RESET_STEPS = [
+  { title: 'Reset this room’s code?', body: 'This clears the HTML, CSS, JavaScript and Assets tabs back to the starter template — for you and everyone else in this room.', btn: 'Yes, reset it' },
+  { title: 'Are you really sure?', body: 'Everything currently written in all four tabs will be gone for good — for the whole room, not just you.', btn: 'Yes, I’m sure' },
+  { title: 'Really, really sure?', body: 'Last check. There is no undo for this. Only tap below if you truly want to wipe this room’s code.', btn: 'Reset everything' },
+];
+let resetStep = 0;
+function showResetStep() {
+  const s = RESET_STEPS[resetStep];
+  $('#rmTitle').textContent = s.title; $('#rmBody').textContent = s.body; $('#rmNext').textContent = s.btn;
+}
+function closeReset() { $('#resetModal').classList.add('hide'); }
+$('#resetBtn').onclick = () => { resetStep = 0; showResetStep(); $('#resetModal').classList.remove('hide'); };
+$('#rmCancel').onclick = closeReset;
+$('#resetModal').addEventListener('click', e => { if (e.target.id === 'resetModal') closeReset(); });
+$('#rmNext').onclick = () => {
+  resetStep++;
+  if (resetStep < RESET_STEPS.length) { showResetStep(); return; }
+  closeReset();
+  wsSend({ type: 'reset' });
+};
+
+// ---- operational transform: ops are {t:'i',p,s} or {t:'d',p,n} ----
 function xf(a, b, after) {
   if (b.t === 'i') {
     if (a.t === 'i') return [b.p < a.p || (b.p === a.p && after) ? { ...a, p: a.p + b.s.length } : a];
@@ -268,6 +255,13 @@ function xfLists(A, B, after) {
 const apply = (s, o) => o.t === 'i' ? s.slice(0, o.p) + o.s + s.slice(o.p) : s.slice(0, o.p) + s.slice(o.p + o.n);
 const moveCursor = (x, o) => o.t === 'i' ? (o.p <= x ? x + o.s.length : x) : (x >= o.p + o.n ? x - o.n : Math.min(x, o.p));
 
+// =====================================================================
+// THE ENGINE. These three functions are pasted into the preview page
+// (so they must not use anything from outside themselves). normalizeAsset
+// and drawParts are also used by the Assets gallery on this page.
+// =====================================================================
+
+// Turns one asset written in the Assets tab into a complete, checked asset.
 function normalizeAsset(name, def) {
   var warnings = [];
   var SH = ['rect', 'circle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'heart', 'line', 'text', 'box', 'sphere', 'cylinder', 'cone'];
@@ -317,7 +311,7 @@ function normalizeAsset(name, def) {
   } else {
     def.parts.forEach(function (p, i) { parts.push(part(p, 'parts[' + i + '] ', w, h, dGiven)); });
   }
-  if (!single) parts.forEach(function (q, i) {
+  if (!single) parts.forEach(function (q, i) {   // for 3D: a part drawn on top of another one (an eye on a face) sits on its front, not buried inside it
     var raw = def.parts[i];
     if (i === 0 || (raw && typeof raw === 'object' && raw.z !== undefined)) return;
     var best = null, j;
@@ -347,6 +341,7 @@ function normalizeAsset(name, def) {
   };
 }
 
+// Draws an asset's shapes. The caller has already moved/rotated/scaled the canvas to the object.
 function drawParts(ctx, parts) {
   function outline(p) {
     var w = p.w, h = p.h, s = ({ box: 'rect', sphere: 'circle', cylinder: 'rect', cone: 'triangle' })[p.shape] || p.shape, i, n, a, r;
@@ -387,7 +382,7 @@ function drawParts(ctx, parts) {
     ctx.globalAlpha = ctx.globalAlpha * p.opacity;
     if (p.shape === 'text') {
       ctx.font = Math.max(1, p.h) + 'px ' + p.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#ff00ff'; ctx.fillStyle = p.color;
+      ctx.fillStyle = '#ff00ff'; ctx.fillStyle = p.color;   // a bad color shows up magenta instead of silently reusing the last one
       ctx.fillText(p.text, 0, 0);
       if (p.stroke) { ctx.lineWidth = p.lineWidth; ctx.strokeStyle = '#ff00ff'; ctx.strokeStyle = p.stroke; ctx.strokeText(p.text, 0, 0); }
     } else if (p.shape === 'line') {
@@ -402,6 +397,7 @@ function drawParts(ctx, parts) {
   }
 }
 
+// The game engine itself: runs inside the preview, before your JavaScript.
 function ENGINE(assetData) {
   var W = window, doc = document, warned = {};
   function warnOnce(m) { if (!warned[m]) { warned[m] = 1; console.warn(m); } }
@@ -426,6 +422,7 @@ function ENGINE(assetData) {
     assets[name] = r.asset;
   });
 
+  // ---- the screen ----
   var cv = doc.createElement('canvas');
   cv.id = '__csCanvas';
   cv.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:-1;display:block';
@@ -463,6 +460,7 @@ function ENGINE(assetData) {
   fit();
   function toWorld(sx, sy) { return { x: (sx - view.ox) / view.scale, y: (sy - view.oy) / view.scale }; }
 
+  // ---- objects ----
   var objects = [], seq = 0;
   function GameObject(a, x, y) {
     this.id = ++seq;
@@ -552,15 +550,39 @@ function ENGINE(assetData) {
     else if (o.y > HH - hh) { o.y = HH - hh; if (m === 'bounce') o.vy = -Math.abs(o.vy); else if (o.vy > 0) o.vy = 0; }
   }
 
+  // ---- 3D: switched on by calling use3D() ----
+  // Same assets, same spawn/onUpdate/onTouch. x = left/right, y = UP, z = toward/away.
+  // An object's x, y, z is the middle of its bottom, so y = 0 stands on the floor.
   var mode3 = false, gl = null, glc = null, prog = null, loc = {}, meshes = {}, colorCache = {}, colorCtx = null;
   var camera = { yaw: 0, pitch: 0.55, distance: 700, fov: 60, drag: true, auto: true, smooth: true, following: null, target: { x: 0, y: 0, z: 0 } };
   var light = { dir: [-0.45, -1, -0.35], ambient: 0.5 };
   world.ground = '#2c3650'; world.shadows = true; world.fog = 4000; world.tile = 40;
   Object.defineProperty(world, 'depth', { get: function () { return world.height; } });
 
+  // camera.mode: "thirdperson" (default) — the camera orbits a little way behind
+  // whatever it's following. "firstperson" — the eye sits right at the object
+  // and looks out from it, like you're inside it looking through its eyes.
+  var camMode = 'thirdperson';
+  Object.defineProperty(camera, 'mode', {
+    enumerable: true,
+    get: function () { return camMode; },
+    set: function (v) {
+      if (v !== 'firstperson' && v !== 'thirdperson') { warnOnce('camera.mode should be "firstperson" or "thirdperson" (got "' + v + '").'); return; }
+      camMode = v;
+    }
+  });
   function eyePos() {
     var c = camera, t = c.target, cp = Math.cos(c.pitch);
+    if (camMode === 'firstperson' && c.following) return [t.x, t.y, t.z];
     return [t.x + Math.sin(c.yaw) * cp * c.distance, t.y + Math.sin(c.pitch) * c.distance, t.z + Math.cos(c.yaw) * cp * c.distance];
+  }
+  // Where the camera is looking at, as a point in the world — the center of the
+  // screen aims here. In third person that's the target it's orbiting; in first
+  // person it's a point straight out in front of the eye, in the look direction.
+  function lookPoint() {
+    var c = camera, t = c.target, cp = Math.cos(c.pitch);
+    if (camMode === 'firstperson' && c.following) return [t.x - Math.sin(c.yaw) * cp, t.y - Math.sin(c.pitch), t.z - Math.cos(c.yaw) * cp];
+    return [t.x, t.y, t.z];
   }
   camera.follow = function (o, opt) {
     opt = opt || {};
@@ -568,7 +590,11 @@ function ENGINE(assetData) {
     if (opt.distance) camera.distance = opt.distance;
     if (opt.pitch !== undefined) camera.pitch = opt.pitch;
     if (opt.smooth !== undefined) camera.smooth = opt.smooth;
+    if (opt.mode) camera.mode = opt.mode;
   };
+  // camera.attach(player) — same as follow(), just reads more clearly when all
+  // you want is "point the camera at this thing", with no distance/pitch tweaks.
+  camera.attach = camera.follow;
   camera.lookAt = function (x, y, z) { camera.following = null; camera.auto = false; camera.target.x = x; camera.target.y = y; camera.target.z = z; };
   camera.moveTo = function (x, y, z) {
     var t = camera.target, dx = x - t.x, dy = y - t.y, dz = z - t.z;
@@ -582,9 +608,10 @@ function ENGINE(assetData) {
     var c = camera, t = c.target;
     if (c.following && c.following.alive) {
       var o = c.following, k = c.smooth ? 1 - Math.exp(-dt * 10) : 1;
-      t.x += (o.x - t.x) * k; t.y += (o.y + o.h * o.scale * 0.5 - t.y) * k; t.z += (o.z - t.z) * k;
+      var eyeH = camMode === 'firstperson' ? o.h * o.scale * 0.85 : o.h * o.scale * 0.5;
+      t.x += (o.x - t.x) * k; t.y += (o.y + eyeH - t.y) * k; t.z += (o.z - t.z) * k;
     } else if (c.auto) { t.x = world.width / 2; t.y = 0; t.z = world.height / 2; }
-    c.pitch = clamp(c.pitch, 0.05, 1.5); c.distance = Math.max(1, c.distance);
+    c.pitch = clamp(c.pitch, camMode === 'firstperson' ? -1.4 : 0.05, 1.5); c.distance = Math.max(1, c.distance);
   }
 
   function rgb(c) {
@@ -597,6 +624,7 @@ function ENGINE(assetData) {
     colorCache[c] = r; return r;
   }
 
+  // 3x3 rotation helpers (column-major)
   function m3mul(a, b) { var o = new Array(9), c, r; for (c = 0; c < 3; c++) for (r = 0; r < 3; r++) o[c * 3 + r] = a[r] * b[c * 3] + a[3 + r] * b[c * 3 + 1] + a[6 + r] * b[c * 3 + 2]; return o; }
   function rotX(a) { var c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, s, 0, -s, c]; }
   function rotY(a) { var c = Math.cos(a), s = Math.sin(a); return [c, 0, -s, 0, 1, 0, s, 0, c]; }
@@ -605,7 +633,7 @@ function ENGINE(assetData) {
   function persp(fov, asp, n, f) { var t = 1 / Math.tan(fov / 2), o = new Float32Array(16); o[0] = t / asp; o[5] = t; o[10] = (f + n) / (n - f); o[11] = -1; o[14] = 2 * f * n / (n - f); return o; }
   function lookAtM(e, t) {
     var zx = e[0] - t[0], zy = e[1] - t[1], zz = e[2] - t[2], l = Math.hypot(zx, zy, zz) || 1; zx /= l; zy /= l; zz /= l;
-    var xx = zz, xy = 0, xz = -zx; l = Math.hypot(xx, xz) || 1; xx /= l; xz /= l;
+    var xx = zz, xy = 0, xz = -zx; l = Math.hypot(xx, xz) || 1; xx /= l; xz /= l;        // up is (0,1,0), so right = up x z
     var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
     var o = new Float32Array(16);
     o[0] = xx; o[1] = yx; o[2] = zx; o[4] = xy; o[5] = yy; o[6] = zy; o[8] = xz; o[9] = yz; o[10] = zz;
@@ -613,8 +641,10 @@ function ENGINE(assetData) {
     return o;
   }
 
+  // ---- unit meshes (built once, then scaled per part) ----
   function Builder() { this.p = []; this.n = []; this.i = []; }
   Builder.prototype.v = function (x, y, z, nx, ny, nz) { this.p.push(x, y, z); this.n.push(nx, ny, nz); return this.p.length / 3 - 1; };
+  // one flat triangle of a closed, convex mesh centred on the origin: the face is made to point away from the middle
   Builder.prototype.flat = function (a, b, c) {
     var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz) || 1;
@@ -629,6 +659,7 @@ function ENGINE(assetData) {
     var i0 = this.v(a[0], a[1], a[2], n[0], n[1], n[2]), i1 = this.v(b[0], b[1], b[2], n[0], n[1], n[2]), i2 = this.v(c[0], c[1], c[2], n[0], n[1], n[2]), i3 = this.v(d[0], d[1], d[2], n[0], n[1], n[2]);
     this.i.push(i0, i1, i2, i0, i2, i3);
   };
+  // makes every triangle wind the same way as its normals, then uploads it
   Builder.prototype.finish = function () {
     var I = this.i, P = this.p, N = this.n, k;
     for (k = 0; k < I.length; k += 3) {
@@ -650,7 +681,7 @@ function ENGINE(assetData) {
     return !((d1 < -1e-9 || d2 < -1e-9 || d3 < -1e-9) && (d1 > 1e-9 || d2 > 1e-9 || d3 > 1e-9));
   }
   function polyArea(P) { var a = 0, i; for (i = 0; i < P.length; i++) { var p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a; }
-  function triangulate(P) {
+  function triangulate(P) {   // ear clipping, for the front and back of flat shapes like star and heart
     var idx = [], out = [], i, n = P.length, guard = 0;
     for (i = 0; i < n; i++) idx.push(i);
     if (polyArea(P) < 0) idx.reverse();
@@ -670,11 +701,11 @@ function ENGINE(assetData) {
     else for (i = 1; i < idx.length - 1; i++) out.push([idx[0], idx[i], idx[i + 1]]);
     return out;
   }
-  function outline2(kind, n) {
+  function outline2(kind, n) {   // flat outline in a 1x1 box, y pointing UP
     var pts = [], i, a, r, t, k;
     if (kind === 'star') { for (i = 0; i < n * 2; i++) { a = -Math.PI / 2 + i * Math.PI / n; r = i % 2 ? 0.45 : 1; pts.push([Math.cos(a) * r * 0.5, -Math.sin(a) * r * 0.5]); } }
     else if (kind === 'poly') { for (i = 0; i < n; i++) { a = -Math.PI / 2 + i * 2 * Math.PI / n; pts.push([Math.cos(a) * 0.5, -Math.sin(a) * 0.5]); } }
-    else {
+    else {   // heart, same curve as the 2D drawing
       var seg = [[0, 0.4, -0.6, -0.05, -0.3, -0.5, 0, -0.2], [0, -0.2, 0.3, -0.5, 0.6, -0.05, 0, 0.4]];
       for (k = 0; k < 2; k++) for (i = 0; i < 14; i++) {
         t = i / 14; var s = seg[k], u = 1 - t;
@@ -727,7 +758,7 @@ function ENGINE(assetData) {
     } else if (kind === 'disc') {
       n = 24;
       for (j = 0; j < n; j++) { var d1 = j * 2 * Math.PI / n, d2 = (j + 1) * 2 * Math.PI / n; b.tri([0, 0, 0], [Math.cos(d2) * 0.5, 0, Math.sin(d2) * 0.5], [Math.cos(d1) * 0.5, 0, Math.sin(d1) * 0.5], [0, 1, 0]); }
-    } else {
+    } else {   // star / poly / heart: the 2D outline pushed back into a solid
       var pts = outline2(kind, N), tris = triangulate(pts), m = pts.length, ccw = polyArea(pts) >= 0;
       tris.forEach(function (t) {
         b.tri([pts[t[0]][0], pts[t[0]][1], 0.5], [pts[t[1]][0], pts[t[1]][1], 0.5], [pts[t[2]][0], pts[t[2]][1], 0.5], [0, 0, 1]);
@@ -799,13 +830,14 @@ function ENGINE(assetData) {
     gl.uniform3fv(loc.uColor, col); gl.uniform3fv(loc.uColor2, col2 || col); gl.uniform1f(loc.uAlpha, alpha); gl.uniform1f(loc.uTile, tile || 0);
     gl.drawElements(gl.TRIANGLES, m.n, gl.UNSIGNED_SHORT, 0);
   }
+  // L = rotation * scale (3x3), N = L / scale^2 per column (the inverse transpose)
   function drawPart(mesh, L, pos, sc, col, alpha) {
     var M = new Float32Array([L[0], L[1], L[2], 0, L[3], L[4], L[5], 0, L[6], L[7], L[8], 0, pos[0], pos[1], pos[2], 1]), N = [], c, r;
     for (c = 0; c < 3; c++) for (r = 0; r < 3; r++) N.push(L[c * 3 + r] / (sc[c] * sc[c] || 1));
     drawMesh(mesh, M, N, col, null, alpha, 0);
   }
   function objectMatrix(o) { return m3mul(m3mul(rotY(o.angle * Math.PI / 180), rotX((o.tilt || 0) * Math.PI / 180)), rotZ((o.roll || 0) * Math.PI / 180)); }
-  function drawObject3(o, pass) {
+  function drawObject3(o, pass) {   // pass 0 = solid parts, 1 = see-through parts
     var s = o.scale, sx = o.baseW ? o.w * s / o.baseW : s, sy = o.baseH ? o.h * s / o.baseH : s, sz = o.baseD ? o.d * s / o.baseD : s;
     var R = objectMatrix(o), cx = o.x, cy = o.y + o.h * s / 2, cz = o.z, i;
     for (i = 0; i < o.parts.length; i++) {
@@ -827,8 +859,12 @@ function ENGINE(assetData) {
     gl.viewport(0, 0, w, h); gl.useProgram(prog);
     var bg = rgb(world.background || '#000000');
     gl.clearColor(bg[0], bg[1], bg[2], 1); gl.depthMask(true); gl.disable(gl.BLEND); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    var e = eyePos(), t = camera.target;
-    var VP = m4mul(persp(clamp(camera.fov, 20, 120) * Math.PI / 180, w / h, clamp(camera.distance * 0.05, 1, 40), 12000), lookAtM(e, [t.x, t.y, t.z]));
+    var e = eyePos(), lp = lookPoint();
+    // In first person the eye sits right where the orbit distance used to be measured
+    // from, so that distance no longer means anything here — use a small fixed near
+    // plane instead, or nearby objects (including the object you're inside) vanish.
+    var near = camMode === 'firstperson' ? 1 : clamp(camera.distance * 0.05, 1, 40);
+    var VP = m4mul(persp(clamp(camera.fov, 20, 120) * Math.PI / 180, w / h, near, 12000), lookAtM(e, lp));
     var ld = light.dir, ll = Math.hypot(ld[0], ld[1], ld[2]) || 1;
     gl.uniformMatrix4fv(loc.uVP, false, VP);
     gl.uniform3f(loc.uLight, ld[0] / ll, ld[1] / ll, ld[2] / ll); gl.uniform1f(loc.uAmb, clamp(light.ambient, 0, 1));
@@ -867,9 +903,10 @@ function ENGINE(assetData) {
       if (o.z < hd) { o.z = hd; if (m === 'bounce') o.vz = Math.abs(o.vz); else if (o.vz < 0) o.vz = 0; }
       else if (o.z > DD - hd) { o.z = DD - hd; if (m === 'bounce') o.vz = -Math.abs(o.vz); else if (o.vz > 0) o.vz = 0; }
     }
-    if (o.y <= 0) { o.y = 0; if (o.vy < 0) o.vy = m === 'bounce' ? -o.vy : 0; o.onGround = true; } else o.onGround = false;
+    if (o.y <= 0) { o.y = 0; if (o.vy < 0) o.vy = m === 'bounce' ? -o.vy : 0; o.onGround = true; } else o.onGround = false;   // the floor always holds you up
   }
 
+  // ---- input: keyboard, touch controls, pointer ----
   var keys = {}, keyTap = {}, touches = {}, padNow = {}, btnNow = {}, prevIn = {};
   var input = { left: false, right: false, up: false, down: false, A: false, B: false, x: 0, y: 0, buttons: {}, just: {}, move: { x: 0, z: 0 }, pointer: { x: 0, y: 0, down: false }, key: function (k) { return !!keys[String(k).toLowerCase()]; } };
   var controls = function (opts) {
@@ -948,10 +985,10 @@ function ENGINE(assetData) {
         if (dx < -th) pad.left = true; if (dx > th) pad.right = true; if (dy < -th) pad.up = true; if (dy > th) pad.down = true;
       } else if (t.kind === 'btn') btns[t.name] = true;
     }
-    for (k in tapped) btns[k] = true;
+    for (k in tapped) btns[k] = true;   // a tap shorter than one frame still counts
     tapped = {};
     padNow = pad; btnNow = btns;
-    var kt = keyTap; keyTap = {};
+    var kt = keyTap; keyTap = {};   // a key tapped and released inside one frame still counts for that frame
     function K(n) { return keys[n] || kt[n]; }
     var now = {
       left: !!(K('arrowleft') || K('a') || pad.left), right: !!(K('arrowright') || K('d') || pad.right),
@@ -962,7 +999,7 @@ function ENGINE(assetData) {
     input.x = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     input.y = (input.down ? 1 : 0) - (input.up ? 1 : 0);
     input.buttons = btns;
-    if (mode3) {
+    if (mode3) {   // the D-pad / arrow keys, turned to match where the camera is looking
       var sy = Math.sin(camera.yaw), cy = Math.cos(camera.yaw), fwd = -input.y;
       var mx = cy * input.x - sy * fwd, mz = -sy * input.x - cy * fwd, ml = Math.hypot(mx, mz);
       if (ml > 1) { mx /= ml; mz /= ml; }
@@ -970,6 +1007,7 @@ function ENGINE(assetData) {
     }
   }
 
+  // ---- timers, callbacks, the game loop ----
   var updates = [], draws = [], rules = [], timers = [], hudText = '', last = performance.now();
   function onUpdate(fn) { updates.push(fn); return fn; }
   function onDraw(fn) { draws.push(fn); return fn; }
@@ -1130,6 +1168,7 @@ function ENGINE(assetData) {
   W.random = random; W.randomInt = randomInt; W.clamp = clamp; W.distance = distance;
 }
 
+// Runs INSIDE the preview, first. Sends console output and errors back to this page.
 function BOOT(jsStart, jsLines) {
   function send(kind, text) { try { parent.postMessage({ __cs: 1, kind: kind, text: text }, '*'); } catch (e) {} }
   function fmt(a) { if (typeof a === 'string') return a; try { var s = JSON.stringify(a); return s === undefined ? String(a) : s; } catch (e) { return String(a); } }
@@ -1155,9 +1194,16 @@ function BOOT(jsStart, jsLines) {
   window.addEventListener('unhandledrejection', function (e) { send('error', 'Unhandled promise rejection: ' + ((e.reason && e.reason.message) || e.reason)); });
 }
 
+// =====================================================================
+// Assets tab text: "relaxed JSON" (comments, trailing commas, unquoted
+// names and 'single quotes' are all fine). Written by hand instead of
+// using eval, so nothing typed in the Assets tab can ever run on this page.
+// It also remembers where each value sits in the text, so the gallery can
+// change one color or number without touching anything else.
+// =====================================================================
 function parseRelaxed(src) {
   let i = 0;
-  const ranges = new Map(), objs = new Map();
+  const ranges = new Map(), objs = new Map(), keyRanges = new Map();
   const key = path => path.join('\u0001');
   function fail(msg, at) {
     if (at === undefined) at = i;
@@ -1234,6 +1280,7 @@ function parseRelaxed(src) {
       ws();
       if (i >= src.length) fail('this { was never closed (a } is missing)', open);
       if (src[i] === '}') { i++; break; }
+      const keyStart = i;
       let k;
       if (src[i] === '"' || src[i] === "'") k = str();
       else {
@@ -1242,6 +1289,7 @@ function parseRelaxed(src) {
         k = m[0]; i += k.length;
       }
       if (k === '__proto__') fail('that name is not allowed');
+      keyRanges.set(key(path.concat(k)), [keyStart, i]);
       ws();
       if (src[i] !== ':') fail('expected ":" after "' + k + '"');
       i++;
@@ -1274,19 +1322,20 @@ function parseRelaxed(src) {
     return out;
   }
   ws();
-  if (i >= src.length) return { value: {}, ranges, objs, rootEmpty: true, insertAt: 0, hasMembers: false };
+  if (i >= src.length) return { value: {}, ranges, objs, keyRanges, rootEmpty: true, insertAt: 0, hasMembers: false };
   if (src[i] !== '{') fail('the Assets tab should start with { and hold one entry per asset');
   const value0 = object([]);
   ws();
   if (i < src.length) fail('there is extra text after the closing }');
   const root = objs.get('');
-  return { value: value0, ranges, objs, rootEmpty: false, insertAt: root.insertAt, hasMembers: root.hasMembers };
+  return { value: value0, ranges, objs, keyRanges, rootEmpty: false, insertAt: root.insertAt, hasMembers: root.hasMembers };
 }
 
+// ---- state: one independent synced document per tab ----
 let ws, id = '', ready = false, active = 'html', rightView = 'preview';
 const files = {};
 for (const t of TABS) files[t.k] = { doc: '', v: 0, outstanding: [], buffer: [], sel: [0, 0], scroll: [0, 0] };
-let peers = {}, cursors = {};
+let peers = {}, cursors = {};   // cursors[id] = { lang, s, e }
 
 const wsSend = o => { if (ws && ws.readyState === 1) ws.send(typeof o === 'string' ? o : JSON.stringify(o)); };
 function shiftCursors(lang, o) { for (const c of Object.values(cursors)) if (c.lang === lang) { c.s = moveCursor(c.s, o); c.e = moveCursor(c.e, o); } }
@@ -1442,9 +1491,8 @@ function setPeers(list) {
   sendCursor(); redraw();
 }
 
-function setState(text, on) { $('#st').textContent = text; $('#top').classList.toggle('on', on); ed.readOnly = !on; runBtn.disabled = !on; }
+function setState(text, on) { $('#st').textContent = text; $('#top').classList.toggle('on', on); ed.readOnly = !on; runBtn.disabled = !on; $('#resetBtn').disabled = !on; }
 function connect() {
-  if (ws) { ws.close(); }
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?room=' + encodeURIComponent(room));
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
@@ -1525,7 +1573,19 @@ function exitFull() { outWeb.classList.remove('full'); $('#fs').textContent = 'F
 $('#fs').onclick = () => { const on = outWeb.classList.toggle('full'); $('#fs').textContent = on ? 'Exit fullscreen' : 'Fullscreen'; };
 
 let galleryTimer = null;
-function docChanged(lang) { if (lang === 'assets' && rightView === 'gallery') { clearTimeout(galleryTimer); galleryTimer = setTimeout(refreshGallery, 120); } }
+function docChanged(lang) { if (lang === 'assets' && rightView === 'gallery') { clearTimeout(galleryTimer); galleryTimer = setTimeout(tryRefreshGallery, 120); } }
+// Rebuilding the gallery replaces every field in it, which would knock the keyboard
+// focus out of whatever you're still typing in. So if that's a number or text field
+// inside the gallery, your value is already saved (fields save as you type) — just
+// wait and check again shortly, instead of rebuilding out from under you.
+function tryRefreshGallery() {
+  const a = document.activeElement, list = $('#gList');
+  if (a && list.contains(a) && a.tagName === 'INPUT' && (a.type === 'number' || a.type === 'text')) {
+    galleryTimer = setTimeout(tryRefreshGallery, 400);
+    return;
+  }
+  refreshGallery();
+}
 const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const pkey = path => path.join('\u0001');
 const scratch = document.createElement('canvas').getContext('2d');
@@ -1560,11 +1620,24 @@ function addMember(objPath, key, rawValue) {
   commitLocal('assets', t.slice(0, o.insertAt) + (o.hasMembers ? ', ' + member : ' ' + member + ' ') + t.slice(o.insertAt));
   return true;
 }
+// Renames an asset by rewriting just its key text (e.g. "player" -> "hero"), wherever
+// it sits in the Assets tab. Nothing else in the file changes, so any spawn("player", ...)
+// calls in your JavaScript still say the old name afterwards — you'll need to update those by hand.
+function renameAsset(oldName, newName) {
+  let p; try { p = parseRelaxed(files.assets.doc); } catch (e) { return false; }
+  const r = p.keyRanges.get(pkey([oldName]));
+  if (!r) return false;
+  const t = files.assets.doc;
+  commitLocal('assets', t.slice(0, r[0]) + JSON.stringify(newName) + t.slice(r[1]));
+  return true;
+}
 function numField(label, path, value, min) {
   const w = h('label', 'fld'); w.append(label + ' ');
   const inp = h('input'); inp.type = 'number'; inp.value = String(value); inp.step = 'any';
   if (min !== undefined) inp.min = String(min);
-  inp.onchange = () => { const v = Number(inp.value); if (inp.value !== '' && isFinite(v)) editValue(path, String(v)); };
+  // "input" (not "change") so it's saved as you type, not only once the field loses focus —
+  // otherwise tapping Run right after editing a number would still use the old value.
+  inp.oninput = () => { const v = Number(inp.value); if (inp.value !== '' && isFinite(v)) editValue(path, String(v)); };
   w.append(inp);
   return w;
 }
@@ -1594,12 +1667,30 @@ function buildCard(name, p) {
 
   const top = h('div', 'ctop');
   top.append(h('span', 'cname', name));
+  const ren = h('button', 'mini', 'Rename'); ren.type = 'button';
+  top.append(ren);
   const copy = h('button', 'mini', 'Copy spawn'); copy.type = 'button';
   copy.onclick = async () => {
     try { await navigator.clipboard.writeText('spawn("' + name + '", 100, 100)'); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy spawn'; }, 1200); } catch (e) {}
   };
   top.append(copy);
   info.append(top, h('div', 'csnip', 'spawn("' + name + '", x, y)'));
+
+  const renRow = h('div', 'crow hide');
+  const renIn = h('input'); renIn.value = name; renIn.setAttribute('aria-label', 'New name for ' + name);
+  const renGo = h('button', 'mini', 'Save'); renGo.type = 'button';
+  const renMsg = h('span', 'cwarn');
+  renGo.onclick = () => {
+    const nn = renIn.value.trim();
+    if (nn === name) { renRow.classList.add('hide'); return; }
+    if (!/^[A-Za-z_$][\w$-]*$/.test(nn)) { renMsg.textContent = 'Use letters, numbers, _ or - (not starting with a number).'; return; }
+    if (Object.prototype.hasOwnProperty.call(p.value, nn)) { renMsg.textContent = 'There’s already an asset named "' + nn + '".'; return; }
+    const ok = renameAsset(name, nn);
+    renMsg.textContent = ok ? '' : 'Could not rename it. Check the Assets text for a mistake.';
+  };
+  ren.onclick = () => { renRow.classList.toggle('hide'); renIn.value = name; renMsg.textContent = ''; if (!renRow.classList.contains('hide')) renIn.focus(); };
+  renRow.append(renIn, renGo, renMsg);
+  info.append(renRow);
 
   if (isObj) {
     const sizes = h('div', 'crow');
@@ -1626,7 +1717,7 @@ function buildCard(name, p) {
       f.append(k + ' ');
       if (typeof v === 'number' && has(path)) {
         const inp = h('input'); inp.type = 'number'; inp.value = String(v); inp.step = 'any';
-        inp.onchange = () => { const n = Number(inp.value); if (inp.value !== '' && isFinite(n)) editValue(path, String(n)); };
+        inp.oninput = () => { const n = Number(inp.value); if (inp.value !== '' && isFinite(n)) editValue(path, String(n)); };
         f.append(inp);
       } else if (typeof v === 'boolean' && has(path)) {
         const inp = h('input'); inp.type = 'checkbox'; inp.checked = v;
@@ -1634,7 +1725,7 @@ function buildCard(name, p) {
         f.append(inp);
       } else if (typeof v === 'string' && has(path)) {
         const inp = h('input'); inp.type = 'text'; inp.value = v;
-        inp.onchange = () => editValue(path, JSON.stringify(inp.value));
+        inp.oninput = () => editValue(path, JSON.stringify(inp.value));
         f.append(inp);
       } else f.append(JSON.stringify(v));
       prow.append(f);
@@ -1670,54 +1761,4 @@ function refreshGallery() {
   clearTimeout(galleryTimer);
   const err = $('#gErr'), list = $('#gList');
   let p;
-  try { p = parseRelaxed(files.assets.doc); }
-  catch (e) { err.textContent = 'Assets: ' + e.message; err.classList.remove('hide'); list.classList.add('stale'); return; }
-  err.classList.add('hide'); list.classList.remove('stale');
-  const names = Object.keys(p.value);
-  $('#gSummary').textContent = 'Assets (' + names.length + ')';
-  list.textContent = '';
-  if (!names.length) list.append(h('div', 'empty', 'No assets yet. Tap "+ New asset" to make one.'));
-  for (const name of names) list.append(buildCard(name, p));
-}
-$('#gNew').onclick = () => {
-  let p;
-  try { p = parseRelaxed(files.assets.doc); }
-  catch (e) { refreshGallery(); return; }
-  let n = 1; while (Object.prototype.hasOwnProperty.call(p.value, 'asset' + n)) n++;
-  const block = '  "asset' + n + '": {\n    "shape": "star",\n    "w": 40,\n    "h": 40,\n    "color": "#ff9de2",\n    "props": { }\n  }';
-  const t = files.assets.doc;
-  if (p.rootEmpty) commitLocal('assets', t.trimEnd() + '\n{\n' + block + '\n}\n');
-  else commitLocal('assets', t.slice(0, p.insertAt) + (p.hasMembers ? ',\n' : '\n') + block + (p.hasMembers ? '' : '\n') + t.slice(p.insertAt));
-  setTimeout(() => { const l = $('#gList'); l.scrollTop = l.scrollHeight; }, 200);
-};
-
-runBtn.onclick = () => { rightView = 'preview'; updateRightPanel(); runProject(null); wsSend({ type: 'run' }); };
-$('#copy').onclick = async () => { try { await navigator.clipboard.writeText(location.href); $('#copy').textContent = 'Copied'; setTimeout(() => $('#copy').textContent = 'Copy room link', 1500); } catch {} };
-const OPEN = { '(': ')', '{': '}', '[': ']' };
-const CLOSERS = new Set([')', '}', ']']);
-ed.addEventListener('keydown', e => {
-  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); return; }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runBtn.click(); return; }
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const doc = files[active].doc;
-  const s = ed.selectionStart, eIdx = ed.selectionEnd;
-  if (s !== eIdx) return;
-  if (e.key === '"') {
-    e.preventDefault();
-    if (doc[s] === '"') ed.setSelectionRange(s + 1, s + 1);
-    else { document.execCommand('insertText', false, '""'); ed.setSelectionRange(s + 1, s + 1); }
-    sendCursor();
-  } else if (OPEN[e.key]) {
-    e.preventDefault();
-    document.execCommand('insertText', false, e.key + OPEN[e.key]);
-    ed.setSelectionRange(s + 1, s + 1);
-    sendCursor();
-  } else if (CLOSERS.has(e.key) && doc[s] === e.key) {
-    e.preventDefault();
-    ed.setSelectionRange(s + 1, s + 1);
-    sendCursor();
-  }
-});
-</script>
-</body>
-</html>
+  try { p = parseRelaxe
