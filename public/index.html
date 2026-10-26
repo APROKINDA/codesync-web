@@ -194,7 +194,12 @@ function start(u) {
   for (const q of ['#top', '#app']) $(q).classList.remove('hide');
   connect();
 }
-(async () => { const r = await api('/api/me'); if (r.ok) start(r.data); else $('#auth').classList.remove('hide'); })();
+(async () => {
+  // If this fails for any reason -- a dropped connection, the server erroring -- always
+  // fall back to showing the sign-in form instead of leaving the page blank forever.
+  try { const r = await api('/api/me'); if (r.ok) { start(r.data); return; } } catch (e) {}
+  $('#auth').classList.remove('hide');
+})();
 
 // ---- profile ----
 $('#me').onclick = () => { $('#pn').value = me.name; $('#pc').value = me.color; $('#pe').textContent = ''; $('#prof').classList.toggle('hide'); };
@@ -1753,12 +1758,4 @@ function buildCard(name, p) {
     toggle.onclick = () => addRow.classList.toggle('hide');
     info.append(addRow);
   }
-  for (const w of warnings.slice(0, 3)) info.append(h('div', 'cwarn', '⚠ ' + w));
-  card.append(thumb, info);
-  return card;
-}
-function refreshGallery() {
-  clearTimeout(galleryTimer);
-  const err = $('#gErr'), list = $('#gList');
-  let p;
-  try { p = parseRelaxe
+  for (const w of warnings.slice(0, 3)) info.append(h('d
