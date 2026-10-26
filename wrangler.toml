@@ -7,5 +7,17 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./public"
 binding = "ASSETS"
 
-[[kv_namespaces]]
-binding = "USERS_KV"
+# Accounts and each room's code live in Durable Objects (see server.js for why).
+# These two bindings are how the Worker reaches them, and the migration below
+# tells Cloudflare to create them with the free SQLite storage backend.
+[[durable_objects.bindings]]
+name = "ACCOUNTS"
+class_name = "Accounts"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Accounts", "Room"]
