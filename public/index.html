@@ -1755,7 +1755,7 @@ function buildCard(name, p) {
       if (props && Object.prototype.hasOwnProperty.call(props, k)) { msg.textContent = 'It already has "' + k + '".'; return; }
       const raw = vin.value.trim();
       const val = raw === '' ? '0' : (raw === 'true' || raw === 'false') ? raw : isFinite(Number(raw)) ? String(Number(raw)) : JSON.stringify(raw);
-      const ok = props ? addMember([name, 'props'], k, val) : addMember([name], 'props'], k, val) : addMember([name], 'props', '{ ' + JSON.stringify(k) + ': ' + val + ' }');
+      const ok = props ? addMember([name, 'props', k, val) : addMember([name], 'props'], k, val) : addMember([name], 'props', '{ ' + JSON.stringify(k) + ': ' + val + ' }');
       msg.textContent = ok ? '' : 'Could not add it. Check the Assets text for a mistake.';
     };
     addRow.append(kin, vin, go, msg);
