@@ -133,50 +133,95 @@ const STARTERS = {
 // Want it in 3D? Put use3D() on the first line and spawn with x, y, z (y is up).
 //
 // Handy commands:
+// (Below, "fn" always means "a function you write" — something like
+// dt => { ... } or () => { ... }. You're writing the code that goes where
+// the dots are; the engine calls it for you at the right moment.)
+//
+// -- Putting things on screen --
 //
 //   spawn("coin", x, y)
 //     Puts an asset from the Assets tab onto the screen at position x, y, and
 //     gives back the new object so you can read or change it afterwards.
+//     Example: const c = spawn("coin", 100, 50); c.color = "red";
+//
+// -- Running code every frame --
+// A "frame" is one single redraw of the screen. Your game redraws about 60
+// times every second, so anything you put inside onUpdate also runs about
+// 60 times a second — that's what makes things move smoothly.
 //
 //   onUpdate(dt => { ... })
-//     Runs once every frame, about 60 times a second. dt is how many seconds
-//     passed since the last frame — multiply movement by dt so speed stays
-//     the same on every device, fast or slow.
+//     Runs your code once every frame, automatically, forever. dt is how
+//     many seconds passed since the last frame — a tiny number, like 0.016.
+//     Multiply movement by dt, like player.x += 100 * dt, so things move at
+//     the same speed on every device instead of faster on a quick phone and
+//     slower on an older one.
+//
+// -- Making things react to each other --
 //
 //   onTouch("player", "coin", (a, b) => { ... })
-//     Runs once whenever something named "player" touches something named
-//     "coin". a is the player, b is the coin.
+//     Runs your code once, the exact moment something named "player" touches
+//     something named "coin". a is the player, b is the coin, so inside you
+//     can write things like b.destroy() or a.health -= 1.
 //
 //   hud("text")
 //     Shows text in the top-left corner of the screen, like a score or
-//     health display. Call it every frame (inside onUpdate) to keep it current.
+//     health display. Call it every frame (inside onUpdate) so it stays
+//     up to date — it only shows whatever you told it last.
+//
+// -- Controls --
 //
 //   controls({ dpad: { size: 130 }, buttons: ["A", "B"] })
-//     Draws on-screen touch controls: a D-pad for moving, and round buttons
-//     for actions. The keyboard still works at the same time.
+//     Draws a D-pad and round buttons on screen for touch play, alongside
+//     your keyboard controls (which still work too). Call it once, usually
+//     near the top of your code, not every frame.
 //
 //   input.left  input.right  input.up  input.down  input.A  input.B
-//     Each one is true while that key or button is being held down. Arrow
-//     keys/WASD move left/right/up/down; Space or Z is A; X or Shift is B.
+//     Each one is true for as long as that key or button is being held
+//     down, and false the rest of the time. Arrow keys or WASD move
+//     left/right/up/down; Space or Z is A; X or Shift is B.
+//     Example: if (input.left) player.x -= 100 * dt;
+//
+// -- Changing something you've spawned --
 //
 //   thing.x  thing.y  thing.w  thing.h  thing.scale  thing.color  thing.destroy()
-//     Properties on any spawned object: its position (x, y), size (w, h),
-//     overall scale, and color — change any of them any time. destroy()
-//     removes the object from the game for good.
+//     Every spawned object has these. x and y are its position, w and h are
+//     its size, scale resizes it all at once, color changes its color — set
+//     any of them, any time, like coin.color = "blue". destroy() removes it
+//     from the game for good (use it when a coin gets collected, for example).
 //
-//   camera.attach(player)   camera.mode = "firstperson" / "thirdperson"   (3D only)
-//     camera.attach(thing) points the camera at something and keeps following
-//     it. camera.mode picks the view: "thirdperson" (the default) watches from
-//     a little way behind and above; "firstperson" puts you right in its eyes,
-//     looking out — drag the screen (or it follows your D-pad turns) to look around.
+// -- Camera (3D games only, after use3D() on the first line) --
 //
-//   after(2, fn)   every(2, fn)
-//     after runs fn once, after the given number of seconds. every runs fn
-//     again and again, every that many seconds, until the game restarts.
+//   camera.attach(player)
+//     Makes the camera automatically follow that object around.
 //
-//   random(1, 10)   world.width   world.height   world.background
-//     random(1, 10) picks a random number in that range. world.width and
-//     world.height are the size of the game screen; world.background is its color.
+//   camera.mode = "thirdperson"   (the default)
+//     Watches from a little way behind and above — like most 3D games.
+//
+//   camera.mode = "firstperson"
+//     Puts the camera right where the object is, looking out — like you're
+//     seeing through its eyes instead of watching it from outside.
+//
+//   In either mode, drag the screen (or use the D-pad/arrow keys) to look
+//   or turn around.
+//
+// -- Timers --
+//
+//   after(2, fn)
+//     Waits 2 seconds, then runs fn once.
+//
+//   every(2, fn)
+//     Runs fn, then keeps running it again every 2 seconds, forever (or
+//     until the game restarts). Example: every(1, () => score += 1);
+//
+// -- Useful values --
+//
+//   random(1, 10)
+//     Gives back a random number between 1 and 10 — a different one each
+//     time you call it.
+//
+//   world.width   world.height   world.background
+//     world.width and world.height are the size of the game screen, in
+//     pixels. world.background is its color, like "#14111f" or "black".
 
 world.size(480, 320);                   // a fixed game screen (delete this line to fill the whole screen)
 world.background = "#14111f";
